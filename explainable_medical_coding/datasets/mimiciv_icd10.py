@@ -48,7 +48,7 @@ class MIMIC_IV_ICD10_Config(datasets.BuilderConfig):
         super(MIMIC_IV_ICD10_Config, self).__init__(**kwargs)
 
 
-class MIMIC_IV_ICD10(datasets.GeneratorBasedBuilder):
+class MimicivIcd10(datasets.GeneratorBasedBuilder):
     """MIMIC-IV-ICD10: A public medical coding dataset from MIMIC-IV with ICD-10 diagnosis and procedure codes Version 1.0"""
 
     BUILDER_CONFIGS = [

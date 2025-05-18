@@ -48,7 +48,7 @@ def main(cfg: OmegaConf) -> None:
     target_columns = list(cfg.data.target_columns)
     dataset_path = Path(cfg.data.dataset_path)
     model_path = Path(cfg.load_model) if cfg.load_model is not None else None
-    dataset = load_dataset(str(dataset_path))
+    dataset = load_dataset(str(dataset_path), trust_remote_code=True)
 
     text_tokenizer = AutoTokenizer.from_pretrained(
         cfg.model.configs.model_path,
