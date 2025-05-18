@@ -5,6 +5,7 @@ import torch.utils.checkpoint
 from pydantic import BaseModel
 from torch import nn
 from transformers import AutoConfig, AutoModel
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 
 from explainable_medical_coding.explainability.helper_functions import (
     create_baseline_input,
@@ -42,6 +43,7 @@ class PLMICD(nn.Module):
         cross_attention: bool = True,
         scale: float = 1.0,
         mask_input: bool = False,
+        use_peft: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -55,9 +57,22 @@ class PLMICD(nn.Module):
             model_path, num_labels=num_classes, finetuning_task=None
         )
 
-        self.roberta_encoder = AutoModel.from_pretrained(
+        base_model = AutoModel.from_pretrained(
             model_path, config=self.config
         )
+
+        if use_peft:
+            # LoRA PEFT config for now
+            peft_config = LoraConfig(
+                task_type=TaskType.SEQ_CLS,
+                inference_mode=False,
+                r=8,
+                lora_alpha=32,
+                lora_dropout=0.1,
+            )
+            self.roberta_encoder = get_peft_model(base_model, peft_config)
+        else:
+            self.roberta_encoder = base_model
 
         if cross_attention:
             self.label_wise_attention = LabelCrossAttention(
