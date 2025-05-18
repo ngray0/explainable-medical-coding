@@ -96,3 +96,7 @@ wandb/
 
 outputs/
 multirun/
+
+data/
+envs/
+modernbert.qsub.sh
