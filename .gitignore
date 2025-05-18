@@ -99,4 +99,5 @@ multirun/
 
 data/
 envs/
+models/
 modernbert.qsub.sh
