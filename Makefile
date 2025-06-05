@@ -67,25 +67,25 @@ prepare_everything:
 download_modernbert:
 	@echo ">>> downloading ModernBERT‑base into models/modernbert-base"
 	python -m pip install --quiet --upgrade huggingface_hub
-	python - <<'PY'
-from huggingface_hub import snapshot_download
-import pathlib, shutil, os, sys
-
-target_dir = pathlib.Path("models/modernbert-base")
-if target_dir.exists():
-    print("ModernBERT already present – skip download.")
-else:
-    snapshot_download(
-        repo_id="answerdotai/ModernBERT-base",
-        local_dir=str(target_dir),
-        local_dir_use_symlinks=False,
-        ignore_patterns=["*.onnx*", "*.msgpack"],
-    )
-    # remove non‑essential files to save quota
-    for fp in target_dir.rglob("*"):
-        if fp.suffix in {".safetensors", ".bin", ".json", ".model"}:
-            continue
-        if fp.is_file():
-            fp.unlink()
-    print("ModernBERT downloaded to", target_dir)
-PY
+	python - <<-'PY'
+	from huggingface_hub import snapshot_download
+	import pathlib, shutil, os, sys
+	
+	target_dir = pathlib.Path("models/modernbert-base")
+	if target_dir.exists():
+	    print("ModernBERT already present – skip download.")
+	else:
+	    snapshot_download(
+	        repo_id="answerdotai/ModernBERT-base",
+	        local_dir=str(target_dir),
+	        local_dir_use_symlinks=False,
+	        ignore_patterns=["*.onnx*", "*.msgpack"],
+	    )
+	    # remove non‑essential files to save quota
+	    for fp in target_dir.rglob("*"):
+	        if fp.suffix in {".safetensors", ".bin", ".json", ".model"}:
+	            continue
+	        if fp.is_file():
+	            fp.unlink()
+	    print("ModernBERT downloaded to", target_dir)
+	PY
