@@ -32,6 +32,13 @@ class RobertaModuleNames(ModuleNames):
     dense_heads: str = "attention.output.dense"
     model_layer_name: str = "roberta_encoder.encoder.layer"
 
+class ModernBertModuleNames(ModuleNames):
+    ln_1: str = "attn_norm"
+    ln_2: str = "mlp_norm"
+    dense_values: str = "attn.Wqkv"
+    dense_heads: str = "attn.Wo"
+    model_layer_name: str = "modernbert.layers"
+
 
 class PLMICD(nn.Module):
     def __init__(
@@ -50,7 +57,7 @@ class PLMICD(nn.Module):
         self.num_classes = num_classes
         self.chunk_size = chunk_size
         self.pad_token_id = pad_token_id
-        self.module_names = RobertaModuleNames()
+        self.module_names = ModernBertModuleNames()
         self.gradient = None
 
         self.config = AutoConfig.from_pretrained(
