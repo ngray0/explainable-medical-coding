@@ -1,11 +1,11 @@
 name: PLMICD
 autoregressive: false
 configs:
-  model_path: answerdotai/ModernBERT-base
+  model_path: models/modernbert-base
   chunk_size: 128
   cross_attention: true
   loss: binary_cross_entropy
   lambda_1: 0.0
   scale: 1
   mask_input: false
-  use_peft: true
+  use_peft: false
