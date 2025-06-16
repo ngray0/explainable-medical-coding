@@ -152,6 +152,14 @@ class PLMICD(nn.Module):
             sequence_output = encoder_outputs[0]
         else:
             # ModernBERT style - direct forward pass
+            # Handle chunked inputs properly
+            batch_chunks, seq_len, hidden_dim = embedding.shape
+            batch_chunks_mask, seq_len_mask = attention_masks.shape
+            
+            # Ensure shapes match
+            assert batch_chunks == batch_chunks_mask and seq_len == seq_len_mask, \
+                f"Shape mismatch: embedding {embedding.shape}, attention_mask {attention_masks.shape}"
+            
             sequence_output = self.roberta_encoder(
                 inputs_embeds=embedding,
                 attention_mask=attention_masks,
