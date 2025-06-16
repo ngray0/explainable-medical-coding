@@ -90,17 +90,21 @@ class Trainer:
         # ── DEBUG: choose a parameter you expect to update every step
         # If ModernBERT follows BERT naming, this will exist; otherwise
         # pick any param that has requires_grad=True.
-        # Check if tok_embeddings requires grad
+        # Check embedding layer requires_grad based on model type
         if hasattr(self.model.roberta_encoder.embeddings, 'tok_embeddings'):
+            # ModernBERT
             print(f"tok_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.tok_embeddings.weight.requires_grad}")
+            param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
+        else:
+            # RoBERTa
+            print(f"word_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.word_embeddings.weight.requires_grad}")
+            param_ref = self.model.roberta_encoder.embeddings.word_embeddings.weight
 
         # Or check all embedding-related parameters
         print("\nEmbedding parameters and their requires_grad status:")
         for name, param in self.model.named_parameters():
             if 'embedding' in name.lower():
                 print(f"{name}: requires_grad={param.requires_grad}")
-
-        param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
 
         num_batches = len(self.dataloaders["train"])
         for batch_idx, batch in enumerate(

@@ -186,11 +186,18 @@ class PLMICD(nn.Module):
     def get_chunked_embedding(self, input_ids):
         input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
         chunk_size = input_ids.size(-1)
-        embedding = self.roberta_encoder.embeddings(input_ids.view(-1, chunk_size))
+        
+        # Handle different embedding layer names
+        if hasattr(self.roberta_encoder.embeddings, 'tok_embeddings'):
+            # ModernBERT style
+            embedding = self.roberta_encoder.embeddings.tok_embeddings(input_ids.view(-1, chunk_size))
+        else:
+            # RoBERTa style
+            embedding = self.roberta_encoder.embeddings(input_ids.view(-1, chunk_size))
         return embedding
 
     def get_token_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Get token embeddings. Huggingface Roberta model can't return more than 512 token embeddings at once.
+        """Get token embeddings. RoBERTa has 512 token limit, ModernBERT supports up to 8192.
 
         Args:
             input_ids (torch.Tensor): input ids
@@ -200,13 +207,23 @@ class PLMICD(nn.Module):
         """
         sequence_length = input_ids.size(1)
         batch_size = input_ids.size(0)
-        if sequence_length <= 512:
-            return self.roberta_encoder.embeddings(input_ids)
+        
+        # Handle different embedding layer names and size limits
+        if hasattr(self.roberta_encoder.embeddings, 'tok_embeddings'):
+            # ModernBERT - likely doesn't have 512 token limit
+            embedding_layer = self.roberta_encoder.embeddings.tok_embeddings
+            max_chunk_size = 8192  # ModernBERT's max_position_embeddings
+        else:
+            # RoBERTa - has 512 token limit
+            embedding_layer = self.roberta_encoder.embeddings
+            max_chunk_size = 512
+            
+        if sequence_length <= max_chunk_size:
+            return embedding_layer(input_ids)
+            
         input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
         chunk_size = input_ids.size(-1)
-        chunked_embeddings = self.roberta_encoder.embeddings(
-            input_ids.view(-1, chunk_size)
-        )
+        chunked_embeddings = embedding_layer(input_ids.view(-1, chunk_size))
         embeddings = chunked_embeddings.view(
             batch_size, -1, chunked_embeddings.size(-1)
         )
@@ -232,8 +249,11 @@ class PLMICD(nn.Module):
                 # For all-padding sequences, set the first token to attend (prevents NaN)
                 attention_mask[zero_token_seqs, 0] = 1
                 
-                # Use CLS token instead of padding token
-                cls_token_id = getattr(self.roberta_encoder.config, 'cls_token_id', 0)
+                # Use appropriate CLS token based on model type
+                if "modernbert" in str(type(self.roberta_encoder)).lower():
+                    cls_token_id = 50281  # ModernBERT CLS token
+                else:
+                    cls_token_id = getattr(self.roberta_encoder.config, 'cls_token_id', 101)  # RoBERTa CLS token
                 input_ids[zero_token_seqs, 0] = cls_token_id
             
             # Fix 2: Handle very short sequences (1-2 tokens) that might be unstable
@@ -248,8 +268,11 @@ class PLMICD(nn.Module):
                     if current_length < 3:
                         # Add attention to the next few tokens
                         attention_mask[seq_idx, current_length:3] = 1
-                        # Set these tokens to something safe (like EOS token)
-                        eos_token_id = getattr(self.roberta_encoder.config, 'eos_token_id', 2)
+                        # Set these tokens to something safe (EOS token based on model type)
+                        if "modernbert" in str(type(self.roberta_encoder)).lower():
+                            eos_token_id = 50282  # ModernBERT EOS token
+                        else:
+                            eos_token_id = getattr(self.roberta_encoder.config, 'eos_token_id', 2)  # RoBERTa EOS token
                         input_ids[seq_idx, current_length:3] = eos_token_id
         
         if hasattr(self.roberta_encoder, 'encoder'):
