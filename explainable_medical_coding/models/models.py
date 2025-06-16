@@ -376,13 +376,35 @@ class PLMICD(nn.Module):
             return self.forward_with_input_masking(
                 input_ids, attention_masks, output_attentions, False
             )
+        
+        # ── DEBUG: Check input tensors
+        if torch.isnan(input_ids).any():
+            print(f"[DEBUG MODEL] input_ids contains NaN")
+        if attention_masks is not None and torch.isnan(attention_masks).any():
+            print(f"[DEBUG MODEL] attention_masks contains NaN")
+        
         hidden_output = self.encoder(input_ids, attention_masks)
-        return self.label_wise_attention(
+        
+        # ── DEBUG: Check encoder output
+        if torch.isnan(hidden_output).any():
+            print(f"[DEBUG MODEL] encoder output contains NaN")
+        
+        final_output = self.label_wise_attention(
             hidden_output,
             attention_masks=attention_masks,
             output_attention=output_attentions,
             attn_grad_hook_fn=attn_grad_hook_fn,
         )
+        
+        # ── DEBUG: Check final output
+        if isinstance(final_output, tuple):
+            if torch.isnan(final_output[0]).any():
+                print(f"[DEBUG MODEL] final_output[0] contains NaN")
+        else:
+            if torch.isnan(final_output).any():
+                print(f"[DEBUG MODEL] final_output contains NaN")
+        
+        return final_output
 
     @torch.no_grad()
     def get_encoder_attention_and_hidden_states(

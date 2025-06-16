@@ -115,19 +115,43 @@ class Trainer:
                     epoch=epoch,
                 )
                 loss = loss / self.accumulate_grad_batches
+                
+                # ── DEBUG: Check for NaN in forward pass
+                if torch.isnan(loss):
+                    print(f"[DEBUG] Loss is NaN at batch {batch_idx}, epoch {epoch}")
+                if torch.isnan(y_probs).any():
+                    print(f"[DEBUG] y_probs contains NaN at batch {batch_idx}, epoch {epoch}")
+                if torch.isnan(targets).any():
+                    print(f"[DEBUG] targets contains NaN at batch {batch_idx}, epoch {epoch}")
 
-            self.gradient_scaler.scale(loss).backward()
+            # Scale and compute gradients
+            scaled_loss = self.gradient_scaler.scale(loss)
+            if torch.isnan(scaled_loss):
+                print(f"[DEBUG] Scaled loss is NaN at batch {batch_idx}, epoch {epoch}")
+            
+            scaled_loss.backward()
 
             if ((batch_idx + 1) % self.accumulate_grad_batches == 0) or (
                 batch_idx + 1 == num_batches
             ):
                 # ── DEBUG (A): snapshot BEFORE optimiser step
                 before = param_ref[0, :5].detach().cpu().clone()
-                grad_norm = (param_ref.grad.data.norm().item()
-                            if param_ref.grad is not None else 0.0)
-
-                if self.config.trainer.clip_grad_norm:
+                
+                # Unscale gradients first to get true gradient norm
+                if self.use_amp:
                     self.gradient_scaler.unscale_(self.optimizer)
+                
+                # Check for NaN gradients after unscaling
+                if param_ref.grad is not None:
+                    if torch.isnan(param_ref.grad).any():
+                        print(f"[DEBUG] param_ref.grad contains NaN at batch {batch_idx}, epoch {epoch}")
+                    grad_norm = param_ref.grad.data.norm().item()
+                else:
+                    print(f"[DEBUG] param_ref.grad is None at batch {batch_idx}, epoch {epoch}")
+                    grad_norm = 0.0
+
+                # Additional gradient clipping if configured
+                if self.config.trainer.clip_grad_norm:
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), self.config.trainer.clip_grad_norm
                     )
