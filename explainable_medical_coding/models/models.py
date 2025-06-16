@@ -134,32 +134,8 @@ class PLMICD(nn.Module):
         
         print(f"[DEBUG INIT] Model initialization complete")
         
-        # ── DEBUG: Test ModernBERT with minimal input
-        print(f"[DEBUG INIT] Testing ModernBERT with minimal input...")
-        try:
-            with torch.no_grad():
-                test_input_ids = torch.tensor([[1, 2, 3, 4, 5]], device='cuda:3')
-                test_attention_mask = torch.tensor([[1, 1, 1, 1, 1]], device='cuda:3')
-                
-                print(f"[DEBUG INIT] Test input shape: {test_input_ids.shape}")
-                print(f"[DEBUG INIT] Test input values: {test_input_ids}")
-                
-                test_outputs = self.roberta_encoder(
-                    input_ids=test_input_ids,
-                    attention_mask=test_attention_mask,
-                    return_dict=False
-                )
-                
-                print(f"[DEBUG INIT] Test output shape: {test_outputs[0].shape}")
-                print(f"[DEBUG INIT] Test output min/max: {torch.min(test_outputs[0]):.6f}/{torch.max(test_outputs[0]):.6f}")
-                print(f"[DEBUG INIT] Test output has NaN: {torch.isnan(test_outputs[0]).any()}")
-                print(f"[DEBUG INIT] Test output has Inf: {torch.isinf(test_outputs[0]).any()}")
-                print(f"[DEBUG INIT] ✓ ModernBERT minimal test PASSED")
-                
-        except Exception as e:
-            print(f"[DEBUG INIT] ✗ ModernBERT minimal test FAILED: {e}")
-            import traceback
-            traceback.print_exc()
+        # ── DEBUG: Test ModernBERT with minimal input (skip during init, model not on GPU yet)
+        print(f"[DEBUG INIT] Skipping minimal test during init - model not on GPU yet")
 
         if cross_attention:
             self.label_wise_attention = LabelCrossAttention(
@@ -426,48 +402,38 @@ class PLMICD(nn.Module):
             except Exception as e:
                 print(f"[DEBUG MODERNBERT] Simple input test FAILED: {e}")
             
-            # Add hooks to trace NaN propagation through ModernBERT layers
-            def create_nan_hook(layer_name):
-                def hook_fn(module, input, output):
-                    if isinstance(output, torch.Tensor):
-                        has_nan = torch.isnan(output).any()
-                        print(f"[DEBUG HOOK] {layer_name}: output has NaN = {has_nan}")
-                        if has_nan:
-                            print(f"[DEBUG HOOK] {layer_name}: output shape = {output.shape}")
-                            print(f"[DEBUG HOOK] {layer_name}: output min/max = {torch.min(output)}/{torch.max(output)}")
-                    elif isinstance(output, tuple):
-                        for i, out in enumerate(output):
-                            if isinstance(out, torch.Tensor):
-                                has_nan = torch.isnan(out).any()
-                                print(f"[DEBUG HOOK] {layer_name}[{i}]: output has NaN = {has_nan}")
+            # Test if mixed precision is causing issues with ModernBERT
+            with torch.cuda.amp.autocast(enabled=False):
+                print(f"[DEBUG MODERNBERT] Calling ModernBERT with autocast disabled...")
+                try:
+                    # Add simple hooks to first few layers only to avoid spam
+                    def simple_hook(name):
+                        def hook_fn(module, input, output):
+                            if isinstance(output, torch.Tensor):
+                                has_nan = torch.isnan(output).any()
                                 if has_nan:
-                                    print(f"[DEBUG HOOK] {layer_name}[{i}]: output shape = {out.shape}")
-                                    print(f"[DEBUG HOOK] {layer_name}[{i}]: output min/max = {torch.min(out)}/{torch.max(out)}")
-                return hook_fn
-            
-            # Register hooks on key ModernBERT layers
-            hooks = []
-            if hasattr(self.roberta_encoder, 'embeddings'):
-                hooks.append(self.roberta_encoder.embeddings.register_forward_hook(create_nan_hook("embeddings")))
-            
-            if hasattr(self.roberta_encoder, 'layers'):
-                for i, layer in enumerate(self.roberta_encoder.layers):
-                    hooks.append(layer.register_forward_hook(create_nan_hook(f"layer_{i}")))
+                                    print(f"[NaN DETECTED] {name}: output has NaN")
+                                else:
+                                    print(f"[LAYER OK] {name}: no NaN")
+                            elif isinstance(output, tuple) and len(output) > 0:
+                                has_nan = torch.isnan(output[0]).any()
+                                if has_nan:
+                                    print(f"[NaN DETECTED] {name}: output[0] has NaN")
+                                else:
+                                    print(f"[LAYER OK] {name}: no NaN")
+                        return hook_fn
                     
-                    # Add hooks to attention and MLP components
-                    if hasattr(layer, 'attn'):
-                        hooks.append(layer.attn.register_forward_hook(create_nan_hook(f"layer_{i}.attn")))
-                    if hasattr(layer, 'mlp'):
-                        hooks.append(layer.mlp.register_forward_hook(create_nan_hook(f"layer_{i}.mlp")))
-                    if hasattr(layer, 'attn_norm'):
-                        hooks.append(layer.attn_norm.register_forward_hook(create_nan_hook(f"layer_{i}.attn_norm")))
-                    if hasattr(layer, 'mlp_norm'):
-                        hooks.append(layer.mlp_norm.register_forward_hook(create_nan_hook(f"layer_{i}.mlp_norm")))
-            
-            try:
-                # Test if mixed precision is causing issues with ModernBERT
-                with torch.cuda.amp.autocast(enabled=False):
-                    print(f"[DEBUG MODERNBERT] Calling ModernBERT with autocast disabled...")
+                    hooks = []
+                    # Add hooks to key layers only
+                    if hasattr(self.roberta_encoder, 'embeddings'):
+                        hooks.append(self.roberta_encoder.embeddings.register_forward_hook(simple_hook("embeddings")))
+                    
+                    # Add hooks to first 3 layers only
+                    if hasattr(self.roberta_encoder, 'layers'):
+                        for i in range(min(3, len(self.roberta_encoder.layers))):
+                            layer = self.roberta_encoder.layers[i]
+                            hooks.append(layer.register_forward_hook(simple_hook(f"layer_{i}")))
+                    
                     try:
                         outputs = self.roberta_encoder(
                             input_ids=input_ids,
@@ -475,13 +441,14 @@ class PLMICD(nn.Module):
                             return_dict=False,
                         )
                         print(f"[DEBUG MODERNBERT] ModernBERT call succeeded")
-                    except Exception as e:
-                        print(f"[DEBUG MODERNBERT] ModernBERT call FAILED: {e}")
-                        raise e
-            finally:
-                # Remove hooks after the call
-                for hook in hooks:
-                    hook.remove()
+                    finally:
+                        # Clean up hooks
+                        for hook in hooks:
+                            hook.remove()
+                            
+                except Exception as e:
+                    print(f"[DEBUG MODERNBERT] ModernBERT call FAILED: {e}")
+                    raise e
         
         # ── DEBUG: Check encoder outputs
         if torch.isnan(outputs[0]).any():
