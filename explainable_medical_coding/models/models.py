@@ -526,7 +526,8 @@ class PLMICD(nn.Module):
                 pad_len = self.chunk_size - seq_len
                 input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=self.pad_token_id)
                 if attention_mask is not None:
-                    attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=0)
+                    # TEST: Use 1 instead of 0 for attention mask padding to avoid all-zero chunks
+                    attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=1)
                 seq_len = self.chunk_size
             
             # Truncate to exact multiple of chunk_size
@@ -544,12 +545,22 @@ class PLMICD(nn.Module):
             input_ids = input_ids.reshape(batch_size, max_chunks, self.chunk_size)
             if attention_mask is not None:
                 attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
-                # Check chunk-level statistics
+                
+                # Check chunk-level statistics BEFORE fixing
                 chunk_sums = torch.sum(attention_mask, dim=2)  # Sum per chunk
-                zero_chunks_per_seq = (chunk_sums == 0).sum(dim=1)
-                print(f"[DEBUG CHUNKING] Zero chunks per sequence: {zero_chunks_per_seq[:4].tolist()}")
-                total_zero_chunks = (chunk_sums == 0).sum().item()
+                zero_chunks_mask = (chunk_sums == 0)
+                total_zero_chunks = zero_chunks_mask.sum().item()
                 print(f"[DEBUG CHUNKING] Total zero chunks created: {total_zero_chunks}")
+                
+                if total_zero_chunks > 0:
+                    print(f"[TEST] Fixing {total_zero_chunks} all-zero chunks by setting first token to attend")
+                    # For all-zero chunks, set the first token to attend (prevent ModernBERT NaN)
+                    attention_mask[zero_chunks_mask, 0] = 1
+                    
+                    # Verify fix worked
+                    fixed_chunk_sums = torch.sum(attention_mask, dim=2)
+                    remaining_zero_chunks = (fixed_chunk_sums == 0).sum().item()
+                    print(f"[TEST] After fix, remaining zero chunks: {remaining_zero_chunks}")
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         
