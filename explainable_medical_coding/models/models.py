@@ -500,13 +500,40 @@ class PLMICD(nn.Module):
         attention_mask=None,
     ):
         r"""
-        input_ids (torch.LongTensor of shape (batch_size, num_chunks, chunk_size))
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_labels)`, `optional`):
+        input_ids can be (batch_size, sequence_length) or (batch_size, num_chunks, chunk_size)
         """
         if self.mask_input:
             return self.forward_with_input_masking(
                 input_ids, attention_mask, False, False
             )
+
+        # Handle both chunked and unchunked input
+        if len(input_ids.shape) == 2:
+            # Input is (batch_size, sequence_length) - need to chunk it
+            # Use simple chunking without problematic padding
+            batch_size, seq_len = input_ids.shape
+            
+            # Truncate to fit chunk_size exactly (avoid padding issues)
+            max_chunks = seq_len // self.chunk_size
+            if max_chunks == 0:
+                max_chunks = 1
+                # For short sequences, just pad to chunk_size
+                pad_len = self.chunk_size - seq_len
+                input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=self.pad_token_id)
+                if attention_mask is not None:
+                    attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=0)
+                seq_len = self.chunk_size
+            
+            # Truncate to exact multiple of chunk_size
+            truncated_len = max_chunks * self.chunk_size
+            input_ids = input_ids[:, :truncated_len]
+            if attention_mask is not None:
+                attention_mask = attention_mask[:, :truncated_len]
+                
+            # Reshape to chunks
+            input_ids = input_ids.view(batch_size, max_chunks, self.chunk_size)
+            if attention_mask is not None:
+                attention_mask = attention_mask.view(batch_size, max_chunks, self.chunk_size)
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         outputs = self.roberta_encoder(
