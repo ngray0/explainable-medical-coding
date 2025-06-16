@@ -207,44 +207,89 @@ class PLMICD(nn.Module):
 
     def _call_encoder_safely(self, input_ids, attention_mask):
         """Wrapper to call roberta_encoder with proper parameters for both RoBERTa and ModernBERT"""
+        # ── DEBUG: Check inputs to encoder
+        print(f"[DEBUG ENCODER] input_ids shape: {input_ids.shape}")
+        print(f"[DEBUG ENCODER] input_ids min/max: {torch.min(input_ids)}/{torch.max(input_ids)}")
+        print(f"[DEBUG ENCODER] vocab_size: {self.roberta_encoder.config.vocab_size}")
+        if attention_mask is not None:
+            print(f"[DEBUG ENCODER] attention_mask shape: {attention_mask.shape}")
+            print(f"[DEBUG ENCODER] attention_mask sum: {torch.sum(attention_mask)}")
+        
+        if torch.isnan(input_ids).any():
+            print(f"[DEBUG ENCODER] input_ids contains NaN!")
+        if attention_mask is not None and torch.isnan(attention_mask).any():
+            print(f"[DEBUG ENCODER] attention_mask contains NaN!")
+            
+        # Check if input_ids are within vocab range
+        if torch.max(input_ids) >= self.roberta_encoder.config.vocab_size:
+            print(f"[DEBUG ENCODER] ERROR: input_ids max: {torch.max(input_ids)}, vocab_size: {self.roberta_encoder.config.vocab_size}")
+            raise ValueError(f"input_ids contains tokens >= vocab_size")
+        
         if hasattr(self.roberta_encoder, 'encoder'):
             # RoBERTa style - can use direct call
-            return self.roberta_encoder(
+            print(f"[DEBUG ENCODER] Using RoBERTa-style call")
+            outputs = self.roberta_encoder(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 return_dict=False,
             )
         else:
             # ModernBERT style - needs special handling
-            # Check if input_ids are within vocab range
-            if torch.max(input_ids) >= self.roberta_encoder.config.vocab_size:
-                print(f"[DEBUG] input_ids max: {torch.max(input_ids)}, vocab_size: {self.roberta_encoder.config.vocab_size}")
-                raise ValueError(f"input_ids contains tokens >= vocab_size")
-            
-            return self.roberta_encoder(
+            print(f"[DEBUG ENCODER] Using ModernBERT-style call")
+            outputs = self.roberta_encoder(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 return_dict=False,
             )
+        
+        # ── DEBUG: Check encoder outputs
+        if torch.isnan(outputs[0]).any():
+            print(f"[DEBUG ENCODER] ERROR: encoder outputs contain NaN!")
+            print(f"[DEBUG ENCODER] outputs[0] shape: {outputs[0].shape}")
+            print(f"[DEBUG ENCODER] outputs[0] min/max: {torch.min(outputs[0])}/{torch.max(outputs[0])}")
+        else:
+            print(f"[DEBUG ENCODER] encoder outputs OK - no NaN")
+            
+        return outputs
 
     def encoder(
         self,
         input_ids: torch.Tensor,
         attention_masks: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        print(f"[DEBUG CHUNKING] Original input_ids shape: {input_ids.shape}")
+        print(f"[DEBUG CHUNKING] pad_token_id: {self.pad_token_id}")
+        print(f"[DEBUG CHUNKING] chunk_size: {self.chunk_size}")
+        
         input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
+        print(f"[DEBUG CHUNKING] After chunking input_ids shape: {input_ids.shape}")
+        
         if attention_masks is not None:
+            print(f"[DEBUG CHUNKING] Original attention_masks shape: {attention_masks.shape}")
             attention_masks = self.get_chunked_attention_masks(attention_masks)
+            print(f"[DEBUG CHUNKING] After chunking attention_masks shape: {attention_masks.shape}")
+            
         batch_size, num_chunks, chunk_size = input_ids.size()
+        print(f"[DEBUG CHUNKING] batch_size: {batch_size}, num_chunks: {num_chunks}, chunk_size: {chunk_size}")
+        
+        # Check for issues in chunked data
+        reshaped_input_ids = input_ids.view(-1, chunk_size)
+        reshaped_attention_masks = attention_masks.view(-1, chunk_size) if attention_masks is not None else None
+        
+        print(f"[DEBUG CHUNKING] Reshaped input_ids shape: {reshaped_input_ids.shape}")
+        if reshaped_attention_masks is not None:
+            print(f"[DEBUG CHUNKING] Reshaped attention_masks shape: {reshaped_attention_masks.shape}")
         
         # Use the safe encoder wrapper
         outputs = self._call_encoder_safely(
-            input_ids=input_ids.view(-1, chunk_size),
-            attention_mask=attention_masks.view(-1, chunk_size)
-            if attention_masks is not None
-            else None,
+            input_ids=reshaped_input_ids,
+            attention_mask=reshaped_attention_masks,
         )
-        return outputs[0].view(batch_size, num_chunks * chunk_size, -1)
+        
+        final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
+        print(f"[DEBUG CHUNKING] Final output shape: {final_output.shape}")
+        
+        return final_output
 
     def forward_with_input_masking(
         self,
