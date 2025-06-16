@@ -236,11 +236,14 @@ class PLMICD(nn.Module):
         else:
             # ModernBERT style - needs special handling
             print(f"[DEBUG ENCODER] Using ModernBERT-style call")
-            outputs = self.roberta_encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                return_dict=False,
-            )
+            
+            # Test if mixed precision is causing issues with ModernBERT
+            with torch.cuda.amp.autocast(enabled=False):
+                outputs = self.roberta_encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=False,
+                )
         
         # ── DEBUG: Check encoder outputs
         if torch.isnan(outputs[0]).any():
