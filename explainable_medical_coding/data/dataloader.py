@@ -97,7 +97,15 @@ class BaseDataset(torch.utils.data.Dataset):
         else:
             targets = self.target_tokenizer.torch_one_hot_encoder(target_ids_list)
 
-        attention_masks = self.pad(sequence=batch["attention_mask"], pad_id=1)
+        attention_masks = self.pad(sequence=batch["attention_mask"], pad_id=0)
+        
+        # Fix for ModernBERT: Ensure no sequences have all-zero attention masks
+        # This prevents NaN gradients while preserving proper masking for most tokens
+        attention_sums = torch.sum(attention_masks, dim=1)
+        all_zero_sequences = (attention_sums == 0)
+        if all_zero_sequences.any():
+            # For sequences with all zeros, set the first token to attend
+            attention_masks[all_zero_sequences, 0] = 1
         lengths = batch["length"]
         ids = batch["_id"]
         texts = batch[TEXT_COLUMN]
