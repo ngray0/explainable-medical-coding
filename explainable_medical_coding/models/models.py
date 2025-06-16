@@ -536,16 +536,45 @@ class PLMICD(nn.Module):
                 attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
 
         batch_size, num_chunks, chunk_size = input_ids.size()
+        
+        # Debug the actual input going to ModernBERT
+        reshaped_input = input_ids.reshape(-1, chunk_size)
+        reshaped_mask = attention_mask.reshape(-1, chunk_size) if attention_mask is not None else None
+        
+        print(f"[DEBUG] About to call ModernBERT:")
+        print(f"[DEBUG] input shape: {reshaped_input.shape}")
+        print(f"[DEBUG] mask shape: {reshaped_mask.shape if reshaped_mask is not None else None}")
+        print(f"[DEBUG] input has NaN: {torch.isnan(reshaped_input).any()}")
+        print(f"[DEBUG] mask has NaN: {torch.isnan(reshaped_mask).any() if reshaped_mask is not None else False}")
+        
+        # Check for all-zero attention mask sequences
+        if reshaped_mask is not None:
+            mask_sums = torch.sum(reshaped_mask, dim=1)
+            zero_chunks = (mask_sums == 0).sum().item()
+            print(f"[DEBUG] Found {zero_chunks} chunks with all-zero attention masks")
+            if zero_chunks > 0:
+                print(f"[DEBUG] This is likely the cause of NaN in ModernBERT!")
+                print(f"[DEBUG] Mask sum range: {torch.min(mask_sums)} to {torch.max(mask_sums)}")
+                # Show some example mask sums
+                print(f"[DEBUG] First 10 mask sums: {mask_sums[:10].tolist()}")
+        
         outputs = self.roberta_encoder(
-            input_ids.reshape(-1, chunk_size),
-            attention_mask=attention_mask.reshape(-1, chunk_size)
-            if attention_mask is not None
-            else None,
+            reshaped_input,
+            attention_mask=reshaped_mask,
             return_dict=False,
         )
-
+        
+        print(f"[DEBUG] ModernBERT output shape: {outputs[0].shape}")
+        print(f"[DEBUG] ModernBERT output has NaN: {torch.isnan(outputs[0]).any()}")
+        
         hidden_output = outputs[0].reshape(batch_size, num_chunks * chunk_size, -1)
+        print(f"[DEBUG] Hidden output shape: {hidden_output.shape}")
+        print(f"[DEBUG] Hidden output has NaN: {torch.isnan(hidden_output).any()}")
+        
         logits = self.attention(hidden_output)
+        print(f"[DEBUG] Logits shape: {logits.shape}")
+        print(f"[DEBUG] Logits has NaN: {torch.isnan(logits).any()}")
+        
         return logits
 
     @torch.no_grad()
