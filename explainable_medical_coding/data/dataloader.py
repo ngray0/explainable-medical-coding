@@ -97,7 +97,7 @@ class BaseDataset(torch.utils.data.Dataset):
         else:
             targets = self.target_tokenizer.torch_one_hot_encoder(target_ids_list)
 
-        attention_masks = self.pad(sequence=batch["attention_mask"], pad_id=0)
+        attention_masks = self.pad(sequence=batch["attention_mask"], pad_id=1)
         lengths = batch["length"]
         ids = batch["_id"]
         texts = batch[TEXT_COLUMN]
