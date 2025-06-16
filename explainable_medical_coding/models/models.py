@@ -84,21 +84,35 @@ class PLMICD(nn.Module):
         print(f"[DEBUG INIT] Model type: {type(self.roberta_encoder)}")
         print(f"[DEBUG INIT] Model initialization complete")
 
-        if cross_attention:
-            self.label_wise_attention = LabelCrossAttention(
-                input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
-            )
-        else:
-            self.label_wise_attention = LabelAttention(
-                input_size=self.config.hidden_size,
-                projection_size=self.config.hidden_size,
-                num_classes=num_classes,
-            )
+        # Use simple attention like the working code
+        self.attention = LabelAttention(
+            input_size=self.config.hidden_size,
+            projection_size=self.config.hidden_size,
+            num_classes=num_classes,
+        )
+        self.loss = torch.nn.functional.binary_cross_entropy_with_logits
         self.mask_input = mask_input
         if self.mask_input:
             self.input_masker = InputMasker(
                 input_size=self.config.hidden_size, scale=scale
             )
+
+    def get_loss(self, logits, targets):
+        return self.loss(logits, targets)
+
+    def training_step(self, batch) -> dict[str, torch.Tensor]:
+        data, targets, attention_mask = batch.data, batch.targets, batch.attention_mask
+        logits = self(data, attention_mask)
+        loss = self.get_loss(logits, targets)
+        logits = torch.sigmoid(logits)
+        return {"logits": logits, "loss": loss, "targets": targets}
+
+    def validation_step(self, batch) -> dict[str, torch.Tensor]:
+        data, targets, attention_mask = batch.data, batch.targets, batch.attention_mask
+        logits = self(data, attention_mask)
+        loss = self.get_loss(logits, targets)
+        logits = torch.sigmoid(logits)
+        return {"logits": logits, "loss": loss, "targets": targets}
 
     @torch.no_grad()
     def predict(
@@ -482,26 +496,30 @@ class PLMICD(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_masks: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-        attn_grad_hook_fn: Optional[Callable] = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        input_ids=None,
+        attention_mask=None,
+    ):
+        r"""
+        input_ids (torch.LongTensor of shape (batch_size, num_chunks, chunk_size))
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_labels)`, `optional`):
+        """
         if self.mask_input:
             return self.forward_with_input_masking(
-                input_ids, attention_masks, output_attentions, False
+                input_ids, attention_mask, False, False
             )
-        
-        hidden_output = self.encoder(input_ids, attention_masks)
-        
-        final_output = self.label_wise_attention(
-            hidden_output,
-            attention_masks=attention_masks,
-            output_attention=output_attentions,
-            attn_grad_hook_fn=attn_grad_hook_fn,
+
+        batch_size, num_chunks, chunk_size = input_ids.size()
+        outputs = self.roberta_encoder(
+            input_ids.view(-1, chunk_size),
+            attention_mask=attention_mask.view(-1, chunk_size)
+            if attention_mask is not None
+            else None,
+            return_dict=False,
         )
-        
-        return final_output
+
+        hidden_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
+        logits = self.attention(hidden_output)
+        return logits
 
     @torch.no_grad()
     def get_encoder_attention_and_hidden_states(
