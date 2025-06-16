@@ -57,7 +57,13 @@ class PLMICD(nn.Module):
         self.num_classes = num_classes
         self.chunk_size = chunk_size
         self.pad_token_id = pad_token_id
-        self.module_names = ModernBertModuleNames()
+        
+        # Set module names based on model type
+        if "modernbert" in model_path.lower():
+            self.module_names = ModernBertModuleNames()
+        else:
+            self.module_names = RobertaModuleNames()
+        
         self.gradient = None
 
         self.config = AutoConfig.from_pretrained(

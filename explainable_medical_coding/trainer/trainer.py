@@ -91,8 +91,8 @@ class Trainer:
         # If ModernBERT follows BERT naming, this will exist; otherwise
         # pick any param that has requires_grad=True.
         # Check if tok_embeddings requires grad
-        if hasattr(self.model.embeddings, 'tok_embeddings'):
-            print(f"tok_embeddings.requires_grad: {self.model.embeddings.tok_embeddings.weight.requires_grad}")
+        if hasattr(self.model.roberta_encoder.embeddings, 'tok_embeddings'):
+            print(f"tok_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.tok_embeddings.weight.requires_grad}")
 
         # Or check all embedding-related parameters
         print("\nEmbedding parameters and their requires_grad status:")
@@ -100,7 +100,7 @@ class Trainer:
             if 'embedding' in name.lower():
                 print(f"{name}: requires_grad={param.requires_grad}")
 
-        param_ref = self.model.embeddings.tok_embeddings.weight
+        param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
 
         num_batches = len(self.dataloaders["train"])
         for batch_idx, batch in enumerate(
