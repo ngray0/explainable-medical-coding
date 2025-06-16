@@ -510,13 +510,7 @@ class PLMICD(nn.Module):
         # Handle both chunked and unchunked input
         if len(input_ids.shape) == 2:
             # Input is (batch_size, sequence_length) - need to chunk it
-            # Use simple chunking without problematic padding
             batch_size, seq_len = input_ids.shape
-            
-            print(f"[DEBUG CHUNKING] Original sequence length: {seq_len}")
-            if attention_mask is not None:
-                original_valid_tokens = torch.sum(attention_mask, dim=1)
-                print(f"[DEBUG CHUNKING] Original valid tokens per sequence: {original_valid_tokens[:4].tolist()}")
             
             # Truncate to fit chunk_size exactly (avoid padding issues)
             max_chunks = seq_len // self.chunk_size
@@ -532,68 +526,25 @@ class PLMICD(nn.Module):
             
             # Truncate to exact multiple of chunk_size
             truncated_len = max_chunks * self.chunk_size
-            print(f"[DEBUG CHUNKING] Truncating from {seq_len} to {truncated_len} tokens ({max_chunks} chunks)")
-            
             input_ids = input_ids[:, :truncated_len]
             if attention_mask is not None:
                 attention_mask = attention_mask[:, :truncated_len]
-                # Check how many valid tokens remain after truncation
-                remaining_valid_tokens = torch.sum(attention_mask, dim=1)
-                print(f"[DEBUG CHUNKING] Valid tokens after truncation: {remaining_valid_tokens[:4].tolist()}")
                 
             # Reshape to chunks
             input_ids = input_ids.reshape(batch_size, max_chunks, self.chunk_size)
             if attention_mask is not None:
                 attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
-                
-                # Check chunk-level statistics - should be no zero chunks with padding=1
-                chunk_sums = torch.sum(attention_mask, dim=2)  # Sum per chunk
-                zero_chunks_mask = (chunk_sums == 0)
-                total_zero_chunks = zero_chunks_mask.sum().item()
-                print(f"[DEBUG CHUNKING] Total zero chunks with padding=1: {total_zero_chunks}")
-                
-                if total_zero_chunks > 0:
-                    print(f"[WARNING] Still found {total_zero_chunks} zero chunks despite padding=1!")
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         
-        # Debug the actual input going to ModernBERT
-        reshaped_input = input_ids.reshape(-1, chunk_size)
-        reshaped_mask = attention_mask.reshape(-1, chunk_size) if attention_mask is not None else None
-        
-        print(f"[DEBUG] About to call ModernBERT:")
-        print(f"[DEBUG] input shape: {reshaped_input.shape}")
-        print(f"[DEBUG] mask shape: {reshaped_mask.shape if reshaped_mask is not None else None}")
-        print(f"[DEBUG] input has NaN: {torch.isnan(reshaped_input).any()}")
-        print(f"[DEBUG] mask has NaN: {torch.isnan(reshaped_mask).any() if reshaped_mask is not None else False}")
-        
-        # Check for all-zero attention mask sequences
-        if reshaped_mask is not None:
-            mask_sums = torch.sum(reshaped_mask, dim=1)
-            zero_chunks = (mask_sums == 0).sum().item()
-            print(f"[DEBUG] Found {zero_chunks} chunks with all-zero attention masks")
-            if zero_chunks > 0:
-                print(f"[DEBUG] This is likely the cause of NaN in ModernBERT!")
-                print(f"[DEBUG] Mask sum range: {torch.min(mask_sums)} to {torch.max(mask_sums)}")
-                # Show some example mask sums
-                print(f"[DEBUG] First 10 mask sums: {mask_sums[:10].tolist()}")
-        
         outputs = self.roberta_encoder(
-            reshaped_input,
-            attention_mask=reshaped_mask,
+            input_ids.reshape(-1, chunk_size),
+            attention_mask=attention_mask.reshape(-1, chunk_size) if attention_mask is not None else None,
             return_dict=False,
         )
         
-        print(f"[DEBUG] ModernBERT output shape: {outputs[0].shape}")
-        print(f"[DEBUG] ModernBERT output has NaN: {torch.isnan(outputs[0]).any()}")
-        
         hidden_output = outputs[0].reshape(batch_size, num_chunks * chunk_size, -1)
-        print(f"[DEBUG] Hidden output shape: {hidden_output.shape}")
-        print(f"[DEBUG] Hidden output has NaN: {torch.isnan(hidden_output).any()}")
-        
         logits = self.attention(hidden_output)
-        print(f"[DEBUG] Logits shape: {logits.shape}")
-        print(f"[DEBUG] Logits has NaN: {torch.isnan(logits).any()}")
         
         return logits
 

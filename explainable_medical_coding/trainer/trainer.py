@@ -119,39 +119,25 @@ class Trainer:
                     epoch=epoch,
                 )
                 loss = loss / self.accumulate_grad_batches
-                
-                # ── DEBUG: Check for NaN in forward pass
-                if torch.isnan(loss):
-                    print(f"[DEBUG] Loss is NaN at batch {batch_idx}, epoch {epoch}")
-                if torch.isnan(y_probs).any():
-                    print(f"[DEBUG] y_probs contains NaN at batch {batch_idx}, epoch {epoch}")
-                if torch.isnan(targets).any():
-                    print(f"[DEBUG] targets contains NaN at batch {batch_idx}, epoch {epoch}")
 
             # Scale and compute gradients
             scaled_loss = self.gradient_scaler.scale(loss)
-            if torch.isnan(scaled_loss):
-                print(f"[DEBUG] Scaled loss is NaN at batch {batch_idx}, epoch {epoch}")
-            
             scaled_loss.backward()
 
             if ((batch_idx + 1) % self.accumulate_grad_batches == 0) or (
                 batch_idx + 1 == num_batches
             ):
-                # ── DEBUG (A): snapshot BEFORE optimiser step
+                # Snapshot BEFORE optimiser step for gradient monitoring
                 before = param_ref[0, :5].detach().cpu().clone()
                 
                 # Unscale gradients first to get true gradient norm
                 if self.use_amp:
                     self.gradient_scaler.unscale_(self.optimizer)
                 
-                # Check for NaN gradients after unscaling
+                # Calculate gradient norm
                 if param_ref.grad is not None:
-                    if torch.isnan(param_ref.grad).any():
-                        print(f"[DEBUG] param_ref.grad contains NaN at batch {batch_idx}, epoch {epoch}")
                     grad_norm = param_ref.grad.data.norm().item()
                 else:
-                    print(f"[DEBUG] param_ref.grad is None at batch {batch_idx}, epoch {epoch}")
                     grad_norm = 0.0
 
                 # Additional gradient clipping if configured
@@ -168,7 +154,7 @@ class Trainer:
                     self.lr_scheduler.step()
                 self.optimizer.zero_grad()
 
-                # ── DEBUG (B): snapshot AFTER optimiser step
+                # Snapshot AFTER optimiser step and show progress for first 50 batches
                 after = param_ref[0, :5].detach().cpu()
                 delta = (after - before).abs().max().item()
 
