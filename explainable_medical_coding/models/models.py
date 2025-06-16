@@ -70,9 +70,28 @@ class PLMICD(nn.Module):
             model_path, num_labels=num_classes, finetuning_task=None
         )
 
+        print(f"[DEBUG INIT] Loading model from: {model_path}")
+        print(f"[DEBUG INIT] Config vocab_size: {self.config.vocab_size}")
+        print(f"[DEBUG INIT] Config hidden_size: {self.config.hidden_size}")
+        print(f"[DEBUG INIT] Config num_hidden_layers: {self.config.num_hidden_layers}")
+        
         base_model = AutoModel.from_pretrained(
             model_path, config=self.config
         )
+        
+        print(f"[DEBUG INIT] Model type: {type(base_model)}")
+        print(f"[DEBUG INIT] Model config type: {type(base_model.config)}")
+        
+        # Check if model loaded correctly
+        try:
+            sample_param = next(base_model.parameters())
+            print(f"[DEBUG INIT] Sample parameter shape: {sample_param.shape}")
+            print(f"[DEBUG INIT] Sample parameter dtype: {sample_param.dtype}")
+            print(f"[DEBUG INIT] Sample parameter device: {sample_param.device}")
+            print(f"[DEBUG INIT] Sample parameter has NaN: {torch.isnan(sample_param).any()}")
+            print(f"[DEBUG INIT] Sample parameter has Inf: {torch.isinf(sample_param).any()}")
+        except Exception as e:
+            print(f"[DEBUG INIT] Error checking model parameters: {e}")
 
         #if use_peft:
             # LoRA PEFT config for now
@@ -86,6 +105,48 @@ class PLMICD(nn.Module):
         #    self.roberta_encoder = get_peft_model(base_model, peft_config)
         #else:
         self.roberta_encoder = base_model
+        
+        # Final check after assignment
+        print(f"[DEBUG INIT] Final roberta_encoder type: {type(self.roberta_encoder)}")
+        print(f"[DEBUG INIT] Has .encoder attribute: {hasattr(self.roberta_encoder, 'encoder')}")
+        print(f"[DEBUG INIT] Has .embeddings attribute: {hasattr(self.roberta_encoder, 'embeddings')}")
+        
+        if hasattr(self.roberta_encoder, 'embeddings'):
+            emb = self.roberta_encoder.embeddings.tok_embeddings.weight
+            print(f"[DEBUG INIT] Embeddings shape: {emb.shape}")
+            print(f"[DEBUG INIT] Embeddings range: [{torch.min(emb):.6f}, {torch.max(emb):.6f}]")
+            print(f"[DEBUG INIT] Embeddings std: {torch.std(emb):.6f}")
+            print(f"[DEBUG INIT] Embeddings has NaN: {torch.isnan(emb).any()}")
+            print(f"[DEBUG INIT] Embeddings has Inf: {torch.isinf(emb).any()}")
+        
+        print(f"[DEBUG INIT] Model initialization complete")
+        
+        # ── DEBUG: Test ModernBERT with minimal input
+        print(f"[DEBUG INIT] Testing ModernBERT with minimal input...")
+        try:
+            with torch.no_grad():
+                test_input_ids = torch.tensor([[1, 2, 3, 4, 5]], device='cuda' if torch.cuda.is_available() else 'cpu')
+                test_attention_mask = torch.tensor([[1, 1, 1, 1, 1]], device='cuda' if torch.cuda.is_available() else 'cpu')
+                
+                print(f"[DEBUG INIT] Test input shape: {test_input_ids.shape}")
+                print(f"[DEBUG INIT] Test input values: {test_input_ids}")
+                
+                test_outputs = self.roberta_encoder(
+                    input_ids=test_input_ids,
+                    attention_mask=test_attention_mask,
+                    return_dict=False
+                )
+                
+                print(f"[DEBUG INIT] Test output shape: {test_outputs[0].shape}")
+                print(f"[DEBUG INIT] Test output min/max: {torch.min(test_outputs[0]):.6f}/{torch.max(test_outputs[0]):.6f}")
+                print(f"[DEBUG INIT] Test output has NaN: {torch.isnan(test_outputs[0]).any()}")
+                print(f"[DEBUG INIT] Test output has Inf: {torch.isinf(test_outputs[0]).any()}")
+                print(f"[DEBUG INIT] ✓ ModernBERT minimal test PASSED")
+                
+        except Exception as e:
+            print(f"[DEBUG INIT] ✗ ModernBERT minimal test FAILED: {e}")
+            import traceback
+            traceback.print_exc()
 
         if cross_attention:
             self.label_wise_attention = LabelCrossAttention(
@@ -237,13 +298,48 @@ class PLMICD(nn.Module):
             # ModernBERT style - needs special handling
             print(f"[DEBUG ENCODER] Using ModernBERT-style call")
             
+            # ── DEBUG: Check ModernBERT model state
+            print(f"[DEBUG MODERNBERT] Model device: {next(self.roberta_encoder.parameters()).device}")
+            print(f"[DEBUG MODERNBERT] Model dtype: {next(self.roberta_encoder.parameters()).dtype}")
+            print(f"[DEBUG MODERNBERT] Model training mode: {self.roberta_encoder.training}")
+            
+            # Check embeddings weights
+            emb_weights = self.roberta_encoder.embeddings.tok_embeddings.weight
+            print(f"[DEBUG MODERNBERT] Embedding weights shape: {emb_weights.shape}")
+            print(f"[DEBUG MODERNBERT] Embedding weights dtype: {emb_weights.dtype}")
+            print(f"[DEBUG MODERNBERT] Embedding weights device: {emb_weights.device}")
+            print(f"[DEBUG MODERNBERT] Embedding weights min/max: {torch.min(emb_weights):.6f}/{torch.max(emb_weights):.6f}")
+            print(f"[DEBUG MODERNBERT] Embedding weights has NaN: {torch.isnan(emb_weights).any()}")
+            print(f"[DEBUG MODERNBERT] Embedding weights has Inf: {torch.isinf(emb_weights).any()}")
+            
+            # Check input dtype and device compatibility
+            print(f"[DEBUG MODERNBERT] input_ids dtype: {input_ids.dtype}, device: {input_ids.device}")
+            print(f"[DEBUG MODERNBERT] attention_mask dtype: {attention_mask.dtype}, device: {attention_mask.device}")
+            
+            # Test embedding lookup manually first
+            print(f"[DEBUG MODERNBERT] Testing embedding lookup...")
+            try:
+                test_embeddings = self.roberta_encoder.embeddings.tok_embeddings(input_ids)
+                print(f"[DEBUG MODERNBERT] Embedding lookup shape: {test_embeddings.shape}")
+                print(f"[DEBUG MODERNBERT] Embedding lookup min/max: {torch.min(test_embeddings):.6f}/{torch.max(test_embeddings):.6f}")
+                print(f"[DEBUG MODERNBERT] Embedding lookup has NaN: {torch.isnan(test_embeddings).any()}")
+                print(f"[DEBUG MODERNBERT] Embedding lookup has Inf: {torch.isinf(test_embeddings).any()}")
+            except Exception as e:
+                print(f"[DEBUG MODERNBERT] Embedding lookup FAILED: {e}")
+            
             # Test if mixed precision is causing issues with ModernBERT
             with torch.cuda.amp.autocast(enabled=False):
-                outputs = self.roberta_encoder(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    return_dict=False,
-                )
+                print(f"[DEBUG MODERNBERT] Calling ModernBERT with autocast disabled...")
+                try:
+                    outputs = self.roberta_encoder(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        return_dict=False,
+                    )
+                    print(f"[DEBUG MODERNBERT] ModernBERT call succeeded")
+                except Exception as e:
+                    print(f"[DEBUG MODERNBERT] ModernBERT call FAILED: {e}")
+                    raise e
         
         # ── DEBUG: Check encoder outputs
         if torch.isnan(outputs[0]).any():
