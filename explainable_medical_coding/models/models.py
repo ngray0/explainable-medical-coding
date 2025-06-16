@@ -526,7 +526,7 @@ class PLMICD(nn.Module):
                 pad_len = self.chunk_size - seq_len
                 input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=self.pad_token_id)
                 if attention_mask is not None:
-                    # TEST: Use 1 instead of 0 for attention mask padding to avoid all-zero chunks
+                    # Use 1 instead of 0 for attention mask padding to prevent all-zero chunks
                     attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=1)
                 seq_len = self.chunk_size
             
@@ -546,24 +546,14 @@ class PLMICD(nn.Module):
             if attention_mask is not None:
                 attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
                 
-                # Check chunk-level statistics BEFORE fixing
+                # Check chunk-level statistics - should be no zero chunks with padding=1
                 chunk_sums = torch.sum(attention_mask, dim=2)  # Sum per chunk
                 zero_chunks_mask = (chunk_sums == 0)
                 total_zero_chunks = zero_chunks_mask.sum().item()
-                print(f"[DEBUG CHUNKING] Total zero chunks created: {total_zero_chunks}")
+                print(f"[DEBUG CHUNKING] Total zero chunks with padding=1: {total_zero_chunks}")
                 
                 if total_zero_chunks > 0:
-                    print(f"[TEST] Fixing {total_zero_chunks} all-zero chunks by setting first token to attend")
-                    # For all-zero chunks, set the first token to attend (prevent ModernBERT NaN)
-                    # zero_chunks_mask is [batch, chunks], attention_mask is [batch, chunks, tokens]
-                    # Need to properly index the 3D tensor
-                    batch_indices, chunk_indices = torch.where(zero_chunks_mask)
-                    attention_mask[batch_indices, chunk_indices, 0] = 1
-                    
-                    # Verify fix worked
-                    fixed_chunk_sums = torch.sum(attention_mask, dim=2)
-                    remaining_zero_chunks = (fixed_chunk_sums == 0).sum().item()
-                    print(f"[TEST] After fix, remaining zero chunks: {remaining_zero_chunks}")
+                    print(f"[WARNING] Still found {total_zero_chunks} zero chunks despite padding=1!")
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         
