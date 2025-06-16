@@ -513,6 +513,11 @@ class PLMICD(nn.Module):
             # Use simple chunking without problematic padding
             batch_size, seq_len = input_ids.shape
             
+            print(f"[DEBUG CHUNKING] Original sequence length: {seq_len}")
+            if attention_mask is not None:
+                original_valid_tokens = torch.sum(attention_mask, dim=1)
+                print(f"[DEBUG CHUNKING] Original valid tokens per sequence: {original_valid_tokens[:4].tolist()}")
+            
             # Truncate to fit chunk_size exactly (avoid padding issues)
             max_chunks = seq_len // self.chunk_size
             if max_chunks == 0:
@@ -526,14 +531,25 @@ class PLMICD(nn.Module):
             
             # Truncate to exact multiple of chunk_size
             truncated_len = max_chunks * self.chunk_size
+            print(f"[DEBUG CHUNKING] Truncating from {seq_len} to {truncated_len} tokens ({max_chunks} chunks)")
+            
             input_ids = input_ids[:, :truncated_len]
             if attention_mask is not None:
                 attention_mask = attention_mask[:, :truncated_len]
+                # Check how many valid tokens remain after truncation
+                remaining_valid_tokens = torch.sum(attention_mask, dim=1)
+                print(f"[DEBUG CHUNKING] Valid tokens after truncation: {remaining_valid_tokens[:4].tolist()}")
                 
             # Reshape to chunks
             input_ids = input_ids.reshape(batch_size, max_chunks, self.chunk_size)
             if attention_mask is not None:
                 attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
+                # Check chunk-level statistics
+                chunk_sums = torch.sum(attention_mask, dim=2)  # Sum per chunk
+                zero_chunks_per_seq = (chunk_sums == 0).sum(dim=1)
+                print(f"[DEBUG CHUNKING] Zero chunks per sequence: {zero_chunks_per_seq[:4].tolist()}")
+                total_zero_chunks = (chunk_sums == 0).sum().item()
+                print(f"[DEBUG CHUNKING] Total zero chunks created: {total_zero_chunks}")
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         
