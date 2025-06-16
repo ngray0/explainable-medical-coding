@@ -72,39 +72,14 @@ class PLMICD(nn.Module):
 
         print(f"[DEBUG INIT] Loading model from: {model_path}")
         print(f"[DEBUG INIT] Config vocab_size: {self.config.vocab_size}")
-        print(f"[DEBUG INIT] Config hidden_size: {self.config.hidden_size}")
-        print(f"[DEBUG INIT] Config num_hidden_layers: {self.config.num_hidden_layers}")
-        print(f"[DEBUG INIT] Config model_type: {getattr(self.config, 'model_type', 'unknown')}")
         print(f"[DEBUG INIT] Config pad_token_id: {getattr(self.config, 'pad_token_id', 'not set')}")
-        print(f"[DEBUG INIT] Config bos_token_id: {getattr(self.config, 'bos_token_id', 'not set')}")
-        print(f"[DEBUG INIT] Config eos_token_id: {getattr(self.config, 'eos_token_id', 'not set')}")
         print(f"[DEBUG INIT] Config max_position_embeddings: {getattr(self.config, 'max_position_embeddings', 'not set')}")
-        print(f"[DEBUG INIT] Config all attributes:")
-        for attr in sorted(dir(self.config)):
-            if not attr.startswith('_') and not callable(getattr(self.config, attr)):
-                try:
-                    value = getattr(self.config, attr)
-                    print(f"[DEBUG INIT]   {attr}: {value}")
-                except:
-                    print(f"[DEBUG INIT]   {attr}: <unable to access>")
         
         base_model = AutoModel.from_pretrained(
             model_path, config=self.config
         )
         
         print(f"[DEBUG INIT] Model type: {type(base_model)}")
-        print(f"[DEBUG INIT] Model config type: {type(base_model.config)}")
-        
-        # Check if model loaded correctly
-        try:
-            sample_param = next(base_model.parameters())
-            print(f"[DEBUG INIT] Sample parameter shape: {sample_param.shape}")
-            print(f"[DEBUG INIT] Sample parameter dtype: {sample_param.dtype}")
-            print(f"[DEBUG INIT] Sample parameter device: {sample_param.device}")
-            print(f"[DEBUG INIT] Sample parameter has NaN: {torch.isnan(sample_param).any()}")
-            print(f"[DEBUG INIT] Sample parameter has Inf: {torch.isinf(sample_param).any()}")
-        except Exception as e:
-            print(f"[DEBUG INIT] Error checking model parameters: {e}")
 
         #if use_peft:
             # LoRA PEFT config for now
@@ -118,24 +93,7 @@ class PLMICD(nn.Module):
         #    self.roberta_encoder = get_peft_model(base_model, peft_config)
         #else:
         self.roberta_encoder = base_model
-        
-        # Final check after assignment
-        print(f"[DEBUG INIT] Final roberta_encoder type: {type(self.roberta_encoder)}")
-        print(f"[DEBUG INIT] Has .encoder attribute: {hasattr(self.roberta_encoder, 'encoder')}")
-        print(f"[DEBUG INIT] Has .embeddings attribute: {hasattr(self.roberta_encoder, 'embeddings')}")
-        
-        if hasattr(self.roberta_encoder, 'embeddings'):
-            emb = self.roberta_encoder.embeddings.tok_embeddings.weight
-            print(f"[DEBUG INIT] Embeddings shape: {emb.shape}")
-            print(f"[DEBUG INIT] Embeddings range: [{torch.min(emb):.6f}, {torch.max(emb):.6f}]")
-            print(f"[DEBUG INIT] Embeddings std: {torch.std(emb):.6f}")
-            print(f"[DEBUG INIT] Embeddings has NaN: {torch.isnan(emb).any()}")
-            print(f"[DEBUG INIT] Embeddings has Inf: {torch.isinf(emb).any()}")
-        
         print(f"[DEBUG INIT] Model initialization complete")
-        
-        # ── DEBUG: Test ModernBERT with minimal input (skip during init, model not on GPU yet)
-        print(f"[DEBUG INIT] Skipping minimal test during init - model not on GPU yet")
 
         if cross_attention:
             self.label_wise_attention = LabelCrossAttention(
@@ -257,70 +215,25 @@ class PLMICD(nn.Module):
 
     def _call_encoder_safely(self, input_ids, attention_mask):
         """Wrapper to call roberta_encoder with proper parameters for both RoBERTa and ModernBERT"""
-        # ── DEBUG: Check inputs to encoder
-        print(f"[DEBUG ENCODER] input_ids shape: {input_ids.shape}")
-        print(f"[DEBUG ENCODER] input_ids dtype: {input_ids.dtype}")
-        print(f"[DEBUG ENCODER] input_ids device: {input_ids.device}")
-        print(f"[DEBUG ENCODER] input_ids min/max: {torch.min(input_ids)}/{torch.max(input_ids)}")
-        print(f"[DEBUG ENCODER] input_ids sample values: {input_ids[0][:10] if input_ids.shape[1] > 10 else input_ids[0]}")
-        print(f"[DEBUG ENCODER] vocab_size: {self.roberta_encoder.config.vocab_size}")
-        if attention_mask is not None:
-            print(f"[DEBUG ENCODER] attention_mask shape: {attention_mask.shape}")
-            print(f"[DEBUG ENCODER] attention_mask dtype: {attention_mask.dtype}")
-            print(f"[DEBUG ENCODER] attention_mask device: {attention_mask.device}")
-            print(f"[DEBUG ENCODER] attention_mask sum: {torch.sum(attention_mask)}")
-            print(f"[DEBUG ENCODER] attention_mask unique values: {torch.unique(attention_mask)}")
-            print(f"[DEBUG ENCODER] attention_mask sample: {attention_mask[0][:10] if attention_mask.shape[1] > 10 else attention_mask[0]}")
-        else:
-            print(f"[DEBUG ENCODER] attention_mask is None")
         
-        if torch.isnan(input_ids).any():
-            print(f"[DEBUG ENCODER] input_ids contains NaN!")
-        if attention_mask is not None and torch.isnan(attention_mask).any():
-            print(f"[DEBUG ENCODER] attention_mask contains NaN!")
-            
-        # Check if input_ids are within vocab range
-        if torch.max(input_ids) >= self.roberta_encoder.config.vocab_size:
-            print(f"[DEBUG ENCODER] ERROR: input_ids max: {torch.max(input_ids)}, vocab_size: {self.roberta_encoder.config.vocab_size}")
-            raise ValueError(f"input_ids contains tokens >= vocab_size")
-        
-        # Check for negative token IDs
-        if torch.min(input_ids) < 0:
-            print(f"[DEBUG ENCODER] ERROR: input_ids contains negative values: min={torch.min(input_ids)}")
-            raise ValueError(f"input_ids contains negative token IDs")
-        
-        # Check sequence lengths - ModernBERT might have different limits
-        max_seq_len = getattr(self.roberta_encoder.config, 'max_position_embeddings', None)
-        if max_seq_len and input_ids.shape[1] > max_seq_len:
-            print(f"[DEBUG ENCODER] WARNING: sequence length {input_ids.shape[1]} exceeds max_position_embeddings {max_seq_len}")
-        
-        # Check for all-padding sequences that might cause issues
+        # Fix for ModernBERT: Handle all-padding sequences that cause NaN
         if attention_mask is not None:
             valid_tokens_per_seq = torch.sum(attention_mask, dim=1)
-            zero_token_seqs = (valid_tokens_per_seq == 0).sum()
-            if zero_token_seqs > 0:
-                print(f"[DEBUG ENCODER] WARNING: {zero_token_seqs} sequences have no valid tokens (all padding)")
+            zero_token_seqs = (valid_tokens_per_seq == 0)
             
-            # Check for sequences that are too short
-            min_tokens = torch.min(valid_tokens_per_seq)
-            max_tokens = torch.max(valid_tokens_per_seq)
-            print(f"[DEBUG ENCODER] Valid tokens per sequence - min: {min_tokens}, max: {max_tokens}")
-        
-        # Check if we're using the expected token types for ModernBERT
-        pad_token_from_config = getattr(self.roberta_encoder.config, 'pad_token_id', None)
-        if pad_token_from_config is not None and pad_token_from_config != self.pad_token_id:
-            print(f"[DEBUG ENCODER] WARNING: Config pad_token_id ({pad_token_from_config}) != model pad_token_id ({self.pad_token_id})")
-        
-        # Check for special tokens in input
-        special_tokens = torch.unique(input_ids[input_ids < 10])  # Common special token range
-        print(f"[DEBUG ENCODER] Special tokens detected in input: {special_tokens.tolist()}")
-        
-        # Validate attention mask format
-        if attention_mask is not None:
-            if not torch.all((attention_mask == 0) | (attention_mask == 1)):
-                print(f"[DEBUG ENCODER] ERROR: attention_mask contains values other than 0/1")
-                print(f"[DEBUG ENCODER] attention_mask unique values: {torch.unique(attention_mask)}")
-                raise ValueError("attention_mask must contain only 0s and 1s")
+            if zero_token_seqs.any():
+                num_empty = zero_token_seqs.sum().item()
+                print(f"[FIX] Found {num_empty} all-padding sequences, fixing for ModernBERT...")
+                
+                # For all-padding sequences, set the first token to attend (prevents NaN)
+                attention_mask = attention_mask.clone()
+                attention_mask[zero_token_seqs, 0] = 1
+                
+                # Also ensure the first token is not a padding token for these sequences
+                input_ids = input_ids.clone()
+                # Use CLS token (typically 0) or BOS token instead of padding
+                cls_token_id = getattr(self.roberta_encoder.config, 'cls_token_id', 0)
+                input_ids[zero_token_seqs, 0] = cls_token_id
         
         if hasattr(self.roberta_encoder, 'encoder'):
             # RoBERTa style - can use direct call
@@ -331,132 +244,16 @@ class PLMICD(nn.Module):
                 return_dict=False,
             )
         else:
-            # ModernBERT style - needs special handling
-            print(f"[DEBUG ENCODER] Using ModernBERT-style call")
-            
-            # ── DEBUG: Check ModernBERT model state
-            print(f"[DEBUG MODERNBERT] Model device: {next(self.roberta_encoder.parameters()).device}")
-            print(f"[DEBUG MODERNBERT] Model dtype: {next(self.roberta_encoder.parameters()).dtype}")
-            print(f"[DEBUG MODERNBERT] Model training mode: {self.roberta_encoder.training}")
-            
-            # Check embeddings weights
-            emb_weights = self.roberta_encoder.embeddings.tok_embeddings.weight
-            print(f"[DEBUG MODERNBERT] Embedding weights shape: {emb_weights.shape}")
-            print(f"[DEBUG MODERNBERT] Embedding weights dtype: {emb_weights.dtype}")
-            print(f"[DEBUG MODERNBERT] Embedding weights device: {emb_weights.device}")
-            print(f"[DEBUG MODERNBERT] Embedding weights min/max: {torch.min(emb_weights):.6f}/{torch.max(emb_weights):.6f}")
-            print(f"[DEBUG MODERNBERT] Embedding weights has NaN: {torch.isnan(emb_weights).any()}")
-            print(f"[DEBUG MODERNBERT] Embedding weights has Inf: {torch.isinf(emb_weights).any()}")
-            
-            # Check input dtype and device compatibility
-            print(f"[DEBUG MODERNBERT] input_ids dtype: {input_ids.dtype}, device: {input_ids.device}")
-            print(f"[DEBUG MODERNBERT] attention_mask dtype: {attention_mask.dtype}, device: {attention_mask.device}")
-            
-            # Check for extreme values in input that could cause numerical issues
-            print(f"[DEBUG MODERNBERT] input_ids unique values count: {torch.unique(input_ids).shape[0]}")
-            print(f"[DEBUG MODERNBERT] attention_mask unique values: {torch.unique(attention_mask)}")
-            
-            # Check model's current precision settings
-            print(f"[DEBUG MODERNBERT] Model in training mode: {self.roberta_encoder.training}")
-            print(f"[DEBUG MODERNBERT] Mixed precision enabled: {torch.is_autocast_enabled()}")
-            
-            # Check for any parameters with extreme values
-            extreme_params = []
-            for name, param in self.roberta_encoder.named_parameters():
-                if torch.isinf(param).any() or torch.isnan(param).any():
-                    extreme_params.append(name)
-                elif param.abs().max() > 1e6 or (param.abs().min() < 1e-6 and param.abs().min() > 0):
-                    extreme_params.append(f"{name} (extreme values)")
-            
-            if extreme_params:
-                print(f"[DEBUG MODERNBERT] Parameters with extreme/invalid values: {extreme_params[:5]}")
-            else:
-                print(f"[DEBUG MODERNBERT] All parameters have reasonable values")
-            
-            # Test embedding lookup manually first
-            print(f"[DEBUG MODERNBERT] Testing embedding lookup...")
-            try:
-                test_embeddings = self.roberta_encoder.embeddings.tok_embeddings(input_ids)
-                print(f"[DEBUG MODERNBERT] Embedding lookup shape: {test_embeddings.shape}")
-                print(f"[DEBUG MODERNBERT] Embedding lookup min/max: {torch.min(test_embeddings):.6f}/{torch.max(test_embeddings):.6f}")
-                print(f"[DEBUG MODERNBERT] Embedding lookup has NaN: {torch.isnan(test_embeddings).any()}")
-                print(f"[DEBUG MODERNBERT] Embedding lookup has Inf: {torch.isinf(test_embeddings).any()}")
-            except Exception as e:
-                print(f"[DEBUG MODERNBERT] Embedding lookup FAILED: {e}")
-            
-            # Test with a simple, non-chunked input to see if chunking is the issue
-            print(f"[DEBUG MODERNBERT] Testing with simple non-chunked input...")
-            try:
-                simple_input = torch.tensor([[1, 2, 3, 4, 5]], device='cuda:3', dtype=input_ids.dtype)
-                simple_mask = torch.tensor([[1, 1, 1, 1, 1]], device='cuda:3', dtype=attention_mask.dtype)
-                
-                with torch.cuda.amp.autocast(enabled=False):
-                    simple_output = self.roberta_encoder(
-                        input_ids=simple_input,
-                        attention_mask=simple_mask,
-                        return_dict=False,
-                    )
-                    print(f"[DEBUG MODERNBERT] Simple input test - output shape: {simple_output[0].shape}")
-                    print(f"[DEBUG MODERNBERT] Simple input test - has NaN: {torch.isnan(simple_output[0]).any()}")
-                    print(f"[DEBUG MODERNBERT] Simple input test - min/max: {torch.min(simple_output[0]):.6f}/{torch.max(simple_output[0]):.6f}")
-            except Exception as e:
-                print(f"[DEBUG MODERNBERT] Simple input test FAILED: {e}")
-            
-            # Test if mixed precision is causing issues with ModernBERT
-            with torch.cuda.amp.autocast(enabled=False):
-                print(f"[DEBUG MODERNBERT] Calling ModernBERT with autocast disabled...")
-                try:
-                    # Add simple hooks to first few layers only to avoid spam
-                    def simple_hook(name):
-                        def hook_fn(module, input, output):
-                            if isinstance(output, torch.Tensor):
-                                has_nan = torch.isnan(output).any()
-                                if has_nan:
-                                    print(f"[NaN DETECTED] {name}: output has NaN")
-                                else:
-                                    print(f"[LAYER OK] {name}: no NaN")
-                            elif isinstance(output, tuple) and len(output) > 0:
-                                has_nan = torch.isnan(output[0]).any()
-                                if has_nan:
-                                    print(f"[NaN DETECTED] {name}: output[0] has NaN")
-                                else:
-                                    print(f"[LAYER OK] {name}: no NaN")
-                        return hook_fn
-                    
-                    hooks = []
-                    # Add hooks to key layers only
-                    if hasattr(self.roberta_encoder, 'embeddings'):
-                        hooks.append(self.roberta_encoder.embeddings.register_forward_hook(simple_hook("embeddings")))
-                    
-                    # Add hooks to first 3 layers only
-                    if hasattr(self.roberta_encoder, 'layers'):
-                        for i in range(min(3, len(self.roberta_encoder.layers))):
-                            layer = self.roberta_encoder.layers[i]
-                            hooks.append(layer.register_forward_hook(simple_hook(f"layer_{i}")))
-                    
-                    try:
-                        outputs = self.roberta_encoder(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            return_dict=False,
-                        )
-                        print(f"[DEBUG MODERNBERT] ModernBERT call succeeded")
-                    finally:
-                        # Clean up hooks
-                        for hook in hooks:
-                            hook.remove()
-                            
-                except Exception as e:
-                    print(f"[DEBUG MODERNBERT] ModernBERT call FAILED: {e}")
-                    raise e
+            # ModernBERT style call
+            outputs = self.roberta_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=False,
+            )
         
-        # ── DEBUG: Check encoder outputs
+        # Check for NaN in outputs
         if torch.isnan(outputs[0]).any():
-            print(f"[DEBUG ENCODER] ERROR: encoder outputs contain NaN!")
-            print(f"[DEBUG ENCODER] outputs[0] shape: {outputs[0].shape}")
-            print(f"[DEBUG ENCODER] outputs[0] min/max: {torch.min(outputs[0])}/{torch.max(outputs[0])}")
-        else:
-            print(f"[DEBUG ENCODER] encoder outputs OK - no NaN")
+            print(f"[DEBUG] ModernBERT still producing NaN after padding fix")
             
         return outputs
 
@@ -465,38 +262,24 @@ class PLMICD(nn.Module):
         input_ids: torch.Tensor,
         attention_masks: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        print(f"[DEBUG CHUNKING] Original input_ids shape: {input_ids.shape}")
-        print(f"[DEBUG CHUNKING] pad_token_id: {self.pad_token_id}")
-        print(f"[DEBUG CHUNKING] chunk_size: {self.chunk_size}")
-        
         input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
-        print(f"[DEBUG CHUNKING] After chunking input_ids shape: {input_ids.shape}")
         
         if attention_masks is not None:
-            print(f"[DEBUG CHUNKING] Original attention_masks shape: {attention_masks.shape}")
             attention_masks = self.get_chunked_attention_masks(attention_masks)
-            print(f"[DEBUG CHUNKING] After chunking attention_masks shape: {attention_masks.shape}")
             
         batch_size, num_chunks, chunk_size = input_ids.size()
-        print(f"[DEBUG CHUNKING] batch_size: {batch_size}, num_chunks: {num_chunks}, chunk_size: {chunk_size}")
         
-        # Check for issues in chunked data
+        # Reshape for batch processing
         reshaped_input_ids = input_ids.view(-1, chunk_size)
         reshaped_attention_masks = attention_masks.view(-1, chunk_size) if attention_masks is not None else None
         
-        print(f"[DEBUG CHUNKING] Reshaped input_ids shape: {reshaped_input_ids.shape}")
-        if reshaped_attention_masks is not None:
-            print(f"[DEBUG CHUNKING] Reshaped attention_masks shape: {reshaped_attention_masks.shape}")
-        
-        # Use the safe encoder wrapper
+        # Use the safe encoder wrapper with all-padding fix
         outputs = self._call_encoder_safely(
             input_ids=reshaped_input_ids,
             attention_mask=reshaped_attention_masks,
         )
         
         final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
-        print(f"[DEBUG CHUNKING] Final output shape: {final_output.shape}")
-        
         return final_output
 
     def forward_with_input_masking(
@@ -653,17 +436,7 @@ class PLMICD(nn.Module):
                 input_ids, attention_masks, output_attentions, False
             )
         
-        # ── DEBUG: Check input tensors
-        if torch.isnan(input_ids).any():
-            print(f"[DEBUG MODEL] input_ids contains NaN")
-        if attention_masks is not None and torch.isnan(attention_masks).any():
-            print(f"[DEBUG MODEL] attention_masks contains NaN")
-        
         hidden_output = self.encoder(input_ids, attention_masks)
-        
-        # ── DEBUG: Check encoder output
-        if torch.isnan(hidden_output).any():
-            print(f"[DEBUG MODEL] encoder output contains NaN")
         
         final_output = self.label_wise_attention(
             hidden_output,
@@ -671,14 +444,6 @@ class PLMICD(nn.Module):
             output_attention=output_attentions,
             attn_grad_hook_fn=attn_grad_hook_fn,
         )
-        
-        # ── DEBUG: Check final output
-        if isinstance(final_output, tuple):
-            if torch.isnan(final_output[0]).any():
-                print(f"[DEBUG MODEL] final_output[0] contains NaN")
-        else:
-            if torch.isnan(final_output).any():
-                print(f"[DEBUG MODEL] final_output contains NaN")
         
         return final_output
 
