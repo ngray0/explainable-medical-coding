@@ -133,20 +133,31 @@ class PLMICD(nn.Module):
         return input_sequence.view(batch_size, -1, self.chunk_size)
 
     def roberta_encode_embedding_input(self, embedding, attention_masks):
-        input_shape = embedding.size()[:-1]
-        extended_attention_mask = self.roberta_encoder.get_extended_attention_mask(
-            attention_masks, input_shape
-        )
-        head_mask = self.roberta_encoder.get_head_mask(
-            None, self.roberta_encoder.config.num_hidden_layers
-        )
-        encoder_outputs = self.roberta_encoder.encoder(
-            embedding,
-            attention_mask=extended_attention_mask,
-            head_mask=head_mask,
-            return_dict=False,
-        )
-        sequence_output = encoder_outputs[0]
+        # Generic approach that works for both RoBERTa and ModernBERT
+        if hasattr(self.roberta_encoder, 'encoder'):
+            # RoBERTa style
+            input_shape = embedding.size()[:-1]
+            extended_attention_mask = self.roberta_encoder.get_extended_attention_mask(
+                attention_masks, input_shape
+            )
+            head_mask = self.roberta_encoder.get_head_mask(
+                None, self.roberta_encoder.config.num_hidden_layers
+            )
+            encoder_outputs = self.roberta_encoder.encoder(
+                embedding,
+                attention_mask=extended_attention_mask,
+                head_mask=head_mask,
+                return_dict=False,
+            )
+            sequence_output = encoder_outputs[0]
+        else:
+            # ModernBERT style - direct forward pass
+            sequence_output = self.roberta_encoder(
+                inputs_embeds=embedding,
+                attention_mask=attention_masks,
+                return_dict=False
+            )[0]
+        
         return sequence_output
 
     def get_chunked_attention_masks(
