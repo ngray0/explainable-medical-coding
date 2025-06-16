@@ -90,7 +90,17 @@ class Trainer:
         # ── DEBUG: choose a parameter you expect to update every step
         # If ModernBERT follows BERT naming, this will exist; otherwise
         # pick any param that has requires_grad=True.
-        param_ref = self.model.embeddings.word_embeddings.weight
+        # Check if tok_embeddings requires grad
+        if hasattr(self.model.embeddings, 'tok_embeddings'):
+            print(f"tok_embeddings.requires_grad: {self.model.embeddings.tok_embeddings.weight.requires_grad}")
+
+        # Or check all embedding-related parameters
+        print("\nEmbedding parameters and their requires_grad status:")
+        for name, param in self.model.named_parameters():
+            if 'embedding' in name.lower():
+                print(f"{name}: requires_grad={param.requires_grad}")
+
+        param_ref = self.model.embeddings.tok_embeddings.weight
 
         num_batches = len(self.dataloaders["train"])
         for batch_idx, batch in enumerate(
@@ -134,10 +144,11 @@ class Trainer:
                 after = param_ref[0, :5].detach().cpu()
                 delta = (after - before).abs().max().item()
 
-                print(
-                    f"[Epoch {epoch} | Batch {batch_idx}] "
-                    f"grad_norm={grad_norm:.4f}  Δmax={delta:.6e}"
-                )
+                if batch_idx < 50:
+                    print(
+                        f"[Epoch {epoch} | Batch {batch_idx}] "
+                        f"grad_norm={grad_norm:.4f}  Δmax={delta:.6e}"
+                    )
 
             self.update_metrics(y_probs=y_probs, targets=targets, loss=loss, split_name="train")
 
