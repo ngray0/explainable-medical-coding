@@ -205,6 +205,28 @@ class PLMICD(nn.Module):
         )
         return embeddings[:, :sequence_length]
 
+    def _call_encoder_safely(self, input_ids, attention_mask):
+        """Wrapper to call roberta_encoder with proper parameters for both RoBERTa and ModernBERT"""
+        if hasattr(self.roberta_encoder, 'encoder'):
+            # RoBERTa style - can use direct call
+            return self.roberta_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=False,
+            )
+        else:
+            # ModernBERT style - needs special handling
+            # Check if input_ids are within vocab range
+            if torch.max(input_ids) >= self.roberta_encoder.config.vocab_size:
+                print(f"[DEBUG] input_ids max: {torch.max(input_ids)}, vocab_size: {self.roberta_encoder.config.vocab_size}")
+                raise ValueError(f"input_ids contains tokens >= vocab_size")
+            
+            return self.roberta_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=False,
+            )
+
     def encoder(
         self,
         input_ids: torch.Tensor,
@@ -214,12 +236,13 @@ class PLMICD(nn.Module):
         if attention_masks is not None:
             attention_masks = self.get_chunked_attention_masks(attention_masks)
         batch_size, num_chunks, chunk_size = input_ids.size()
-        outputs = self.roberta_encoder(
+        
+        # Use the safe encoder wrapper
+        outputs = self._call_encoder_safely(
             input_ids=input_ids.view(-1, chunk_size),
             attention_mask=attention_masks.view(-1, chunk_size)
             if attention_masks is not None
             else None,
-            return_dict=False,
         )
         return outputs[0].view(batch_size, num_chunks * chunk_size, -1)
 
