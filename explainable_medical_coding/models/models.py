@@ -216,24 +216,42 @@ class PLMICD(nn.Module):
     def _call_encoder_safely(self, input_ids, attention_mask):
         """Wrapper to call roberta_encoder with proper parameters for both RoBERTa and ModernBERT"""
         
-        # Fix for ModernBERT: Handle all-padding sequences that cause NaN
-        if attention_mask is not None:
+        # Fix for ModernBERT: Handle problematic sequences that cause NaN
+        if attention_mask is not None and not hasattr(self.roberta_encoder, 'encoder'):
+            # Only apply fixes for ModernBERT, not RoBERTa
+            attention_mask = attention_mask.clone()
+            input_ids = input_ids.clone()
+            
             valid_tokens_per_seq = torch.sum(attention_mask, dim=1)
             zero_token_seqs = (valid_tokens_per_seq == 0)
             
+            # Fix 1: Handle all-padding sequences
             if zero_token_seqs.any():
                 num_empty = zero_token_seqs.sum().item()
                 print(f"[FIX] Found {num_empty} all-padding sequences, fixing for ModernBERT...")
                 
                 # For all-padding sequences, set the first token to attend (prevents NaN)
-                attention_mask = attention_mask.clone()
                 attention_mask[zero_token_seqs, 0] = 1
                 
-                # Also ensure the first token is not a padding token for these sequences
-                input_ids = input_ids.clone()
-                # Use CLS token (typically 0) or BOS token instead of padding
+                # Use CLS token instead of padding token
                 cls_token_id = getattr(self.roberta_encoder.config, 'cls_token_id', 0)
                 input_ids[zero_token_seqs, 0] = cls_token_id
+            
+            # Fix 2: Handle very short sequences (1-2 tokens) that might be unstable
+            very_short_seqs = (valid_tokens_per_seq > 0) & (valid_tokens_per_seq <= 2)
+            if very_short_seqs.any():
+                num_short = very_short_seqs.sum().item()
+                print(f"[FIX] Found {num_short} very short sequences, padding for stability...")
+                
+                # Ensure at least 3 tokens are attended to
+                for seq_idx in torch.where(very_short_seqs)[0]:
+                    current_length = valid_tokens_per_seq[seq_idx].item()
+                    if current_length < 3:
+                        # Add attention to the next few tokens
+                        attention_mask[seq_idx, current_length:3] = 1
+                        # Set these tokens to something safe (like EOS token)
+                        eos_token_id = getattr(self.roberta_encoder.config, 'eos_token_id', 2)
+                        input_ids[seq_idx, current_length:3] = eos_token_id
         
         if hasattr(self.roberta_encoder, 'encoder'):
             # RoBERTa style - can use direct call
@@ -244,16 +262,44 @@ class PLMICD(nn.Module):
                 return_dict=False,
             )
         else:
-            # ModernBERT style call
-            outputs = self.roberta_encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                return_dict=False,
-            )
+            # ModernBERT style call - try with autocast disabled to avoid mixed precision issues
+            with torch.cuda.amp.autocast(enabled=False):
+                outputs = self.roberta_encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    return_dict=False,
+                )
         
         # Check for NaN in outputs
         if torch.isnan(outputs[0]).any():
-            print(f"[DEBUG] ModernBERT still producing NaN after padding fix")
+            print(f"[DEBUG] ModernBERT still producing NaN - investigating...")
+            
+            # Check if specific sequences are causing issues
+            nan_mask = torch.isnan(outputs[0]).any(dim=-1).any(dim=-1)  # [batch_size]
+            num_nan_seqs = nan_mask.sum().item()
+            print(f"[DEBUG] {num_nan_seqs} out of {outputs[0].shape[0]} sequences have NaN")
+            
+            if num_nan_seqs < outputs[0].shape[0]:  # Not all sequences have NaN
+                # Check if it's related to sequence length or content
+                nan_seq_indices = torch.where(nan_mask)[0]
+                valid_seq_indices = torch.where(~nan_mask)[0]
+                
+                if len(nan_seq_indices) > 0 and len(valid_seq_indices) > 0:
+                    print(f"[DEBUG] NaN sequence attention sums: {torch.sum(attention_mask[nan_seq_indices], dim=1)}")
+                    print(f"[DEBUG] Valid sequence attention sums: {torch.sum(attention_mask[valid_seq_indices], dim=1)}")
+                    print(f"[DEBUG] NaN sequence input ranges: {torch.min(input_ids[nan_seq_indices]).item()}-{torch.max(input_ids[nan_seq_indices]).item()}")
+                    print(f"[DEBUG] Valid sequence input ranges: {torch.min(input_ids[valid_seq_indices]).item()}-{torch.max(input_ids[valid_seq_indices]).item()}")
+            
+            # Try a minimal working example to isolate the issue
+            print(f"[DEBUG] Testing minimal sequence...")
+            try:
+                with torch.cuda.amp.autocast(enabled=False):
+                    test_ids = torch.tensor([[0, 1, 2]], device=input_ids.device, dtype=input_ids.dtype)
+                    test_mask = torch.tensor([[1, 1, 1]], device=attention_mask.device, dtype=attention_mask.dtype)
+                    test_out = self.roberta_encoder(input_ids=test_ids, attention_mask=test_mask, return_dict=False)
+                    print(f"[DEBUG] Minimal test: has_nan={torch.isnan(test_out[0]).any()}")
+            except Exception as e:
+                print(f"[DEBUG] Minimal test failed: {e}")
             
         return outputs
 
