@@ -76,20 +76,10 @@ class PLMICD(nn.Module):
         print(f"[DEBUG INIT] Config max_position_embeddings: {getattr(self.config, 'max_position_embeddings', 'not set')}")
         
         # Use the working approach from the successful code
-        if "modernbert" in model_path.lower():
-            # For ModernBERT, use AutoModel with explicit config loading like the working example
-            from transformers import AutoModel
-            self.roberta_encoder = AutoModel.from_pretrained(
-                model_path, 
-                config=self.config,
-                add_pooling_layer=False  # Key difference from original
-            )
-        else:
-            # For RoBERTa, use the original approach
-            base_model = AutoModel.from_pretrained(
-                model_path, config=self.config
-            )
-            self.roberta_encoder = base_model
+        base_model = AutoModel.from_pretrained(
+            model_path, config=self.config
+        )
+        self.roberta_encoder = base_model
         
         print(f"[DEBUG INIT] Model type: {type(self.roberta_encoder)}")
         print(f"[DEBUG INIT] Model initialization complete")
@@ -336,24 +326,14 @@ class PLMICD(nn.Module):
             
         batch_size, num_chunks, chunk_size = input_ids.size()
         
-        # Reshape for batch processing
-        reshaped_input_ids = input_ids.view(-1, chunk_size)
-        reshaped_attention_masks = attention_masks.view(-1, chunk_size) if attention_masks is not None else None
-        
-        # Try the simple direct call approach that works in the reference code
-        if not hasattr(self.roberta_encoder, 'encoder'):
-            # ModernBERT - use simple direct call like the working example
-            outputs = self.roberta_encoder(
-                input_ids=reshaped_input_ids,
-                attention_mask=reshaped_attention_masks,
-                return_dict=False,
-            )
-        else:
-            # RoBERTa - use the safe encoder wrapper 
-            outputs = self._call_encoder_safely(
-                input_ids=reshaped_input_ids,
-                attention_mask=reshaped_attention_masks,
-            )
+        # Use the working pattern from successful code
+        outputs = self.roberta_encoder(
+            input_ids.view(-1, chunk_size),
+            attention_mask=attention_masks.view(-1, chunk_size)
+            if attention_masks is not None
+            else None,
+            return_dict=False,
+        )
         
         final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
         return final_output
