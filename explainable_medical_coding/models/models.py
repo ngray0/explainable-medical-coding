@@ -555,7 +555,10 @@ class PLMICD(nn.Module):
                 if total_zero_chunks > 0:
                     print(f"[TEST] Fixing {total_zero_chunks} all-zero chunks by setting first token to attend")
                     # For all-zero chunks, set the first token to attend (prevent ModernBERT NaN)
-                    attention_mask[zero_chunks_mask, 0] = 1
+                    # zero_chunks_mask is [batch, chunks], attention_mask is [batch, chunks, tokens]
+                    # Need to properly index the 3D tensor
+                    batch_indices, chunk_indices = torch.where(zero_chunks_mask)
+                    attention_mask[batch_indices, chunk_indices, 0] = 1
                     
                     # Verify fix worked
                     fixed_chunk_sums = torch.sum(attention_mask, dim=2)
