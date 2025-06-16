@@ -74,6 +74,19 @@ class PLMICD(nn.Module):
         print(f"[DEBUG INIT] Config vocab_size: {self.config.vocab_size}")
         print(f"[DEBUG INIT] Config hidden_size: {self.config.hidden_size}")
         print(f"[DEBUG INIT] Config num_hidden_layers: {self.config.num_hidden_layers}")
+        print(f"[DEBUG INIT] Config model_type: {getattr(self.config, 'model_type', 'unknown')}")
+        print(f"[DEBUG INIT] Config pad_token_id: {getattr(self.config, 'pad_token_id', 'not set')}")
+        print(f"[DEBUG INIT] Config bos_token_id: {getattr(self.config, 'bos_token_id', 'not set')}")
+        print(f"[DEBUG INIT] Config eos_token_id: {getattr(self.config, 'eos_token_id', 'not set')}")
+        print(f"[DEBUG INIT] Config max_position_embeddings: {getattr(self.config, 'max_position_embeddings', 'not set')}")
+        print(f"[DEBUG INIT] Config all attributes:")
+        for attr in sorted(dir(self.config)):
+            if not attr.startswith('_') and not callable(getattr(self.config, attr)):
+                try:
+                    value = getattr(self.config, attr)
+                    print(f"[DEBUG INIT]   {attr}: {value}")
+                except:
+                    print(f"[DEBUG INIT]   {attr}: <unable to access>")
         
         base_model = AutoModel.from_pretrained(
             model_path, config=self.config
@@ -270,11 +283,20 @@ class PLMICD(nn.Module):
         """Wrapper to call roberta_encoder with proper parameters for both RoBERTa and ModernBERT"""
         # ── DEBUG: Check inputs to encoder
         print(f"[DEBUG ENCODER] input_ids shape: {input_ids.shape}")
+        print(f"[DEBUG ENCODER] input_ids dtype: {input_ids.dtype}")
+        print(f"[DEBUG ENCODER] input_ids device: {input_ids.device}")
         print(f"[DEBUG ENCODER] input_ids min/max: {torch.min(input_ids)}/{torch.max(input_ids)}")
+        print(f"[DEBUG ENCODER] input_ids sample values: {input_ids[0][:10] if input_ids.shape[1] > 10 else input_ids[0]}")
         print(f"[DEBUG ENCODER] vocab_size: {self.roberta_encoder.config.vocab_size}")
         if attention_mask is not None:
             print(f"[DEBUG ENCODER] attention_mask shape: {attention_mask.shape}")
+            print(f"[DEBUG ENCODER] attention_mask dtype: {attention_mask.dtype}")
+            print(f"[DEBUG ENCODER] attention_mask device: {attention_mask.device}")
             print(f"[DEBUG ENCODER] attention_mask sum: {torch.sum(attention_mask)}")
+            print(f"[DEBUG ENCODER] attention_mask unique values: {torch.unique(attention_mask)}")
+            print(f"[DEBUG ENCODER] attention_mask sample: {attention_mask[0][:10] if attention_mask.shape[1] > 10 else attention_mask[0]}")
+        else:
+            print(f"[DEBUG ENCODER] attention_mask is None")
         
         if torch.isnan(input_ids).any():
             print(f"[DEBUG ENCODER] input_ids contains NaN!")
@@ -285,6 +307,44 @@ class PLMICD(nn.Module):
         if torch.max(input_ids) >= self.roberta_encoder.config.vocab_size:
             print(f"[DEBUG ENCODER] ERROR: input_ids max: {torch.max(input_ids)}, vocab_size: {self.roberta_encoder.config.vocab_size}")
             raise ValueError(f"input_ids contains tokens >= vocab_size")
+        
+        # Check for negative token IDs
+        if torch.min(input_ids) < 0:
+            print(f"[DEBUG ENCODER] ERROR: input_ids contains negative values: min={torch.min(input_ids)}")
+            raise ValueError(f"input_ids contains negative token IDs")
+        
+        # Check sequence lengths - ModernBERT might have different limits
+        max_seq_len = getattr(self.roberta_encoder.config, 'max_position_embeddings', None)
+        if max_seq_len and input_ids.shape[1] > max_seq_len:
+            print(f"[DEBUG ENCODER] WARNING: sequence length {input_ids.shape[1]} exceeds max_position_embeddings {max_seq_len}")
+        
+        # Check for all-padding sequences that might cause issues
+        if attention_mask is not None:
+            valid_tokens_per_seq = torch.sum(attention_mask, dim=1)
+            zero_token_seqs = (valid_tokens_per_seq == 0).sum()
+            if zero_token_seqs > 0:
+                print(f"[DEBUG ENCODER] WARNING: {zero_token_seqs} sequences have no valid tokens (all padding)")
+            
+            # Check for sequences that are too short
+            min_tokens = torch.min(valid_tokens_per_seq)
+            max_tokens = torch.max(valid_tokens_per_seq)
+            print(f"[DEBUG ENCODER] Valid tokens per sequence - min: {min_tokens}, max: {max_tokens}")
+        
+        # Check if we're using the expected token types for ModernBERT
+        pad_token_from_config = getattr(self.roberta_encoder.config, 'pad_token_id', None)
+        if pad_token_from_config is not None and pad_token_from_config != self.pad_token_id:
+            print(f"[DEBUG ENCODER] WARNING: Config pad_token_id ({pad_token_from_config}) != model pad_token_id ({self.pad_token_id})")
+        
+        # Check for special tokens in input
+        special_tokens = torch.unique(input_ids[input_ids < 10])  # Common special token range
+        print(f"[DEBUG ENCODER] Special tokens detected in input: {special_tokens.tolist()}")
+        
+        # Validate attention mask format
+        if attention_mask is not None:
+            if not torch.all((attention_mask == 0) | (attention_mask == 1)):
+                print(f"[DEBUG ENCODER] ERROR: attention_mask contains values other than 0/1")
+                print(f"[DEBUG ENCODER] attention_mask unique values: {torch.unique(attention_mask)}")
+                raise ValueError("attention_mask must contain only 0s and 1s")
         
         if hasattr(self.roberta_encoder, 'encoder'):
             # RoBERTa style - can use direct call
