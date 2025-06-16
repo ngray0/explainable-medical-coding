@@ -40,7 +40,7 @@ def get_model(config: OmegaConf, data_info: dict) -> torch.nn.Module:
 def get_optimizer(config: OmegaConf, model: torch.nn.Module) -> torch.optim.Optimizer:
     optimizer_class = getattr(torch.optim, config.name)
     if config.configs.weight_decay:
-        no_decay = ["bias", "LayerNorm.weight"]
+        no_decay = ["bias", "LayerNorm.weight", "attn_norm.weight", "mlp_norm.weight", ]
         optimizer_grouped_parameters = [
             {
                 "params": [
