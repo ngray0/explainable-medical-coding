@@ -75,24 +75,23 @@ class PLMICD(nn.Module):
         print(f"[DEBUG INIT] Config pad_token_id: {getattr(self.config, 'pad_token_id', 'not set')}")
         print(f"[DEBUG INIT] Config max_position_embeddings: {getattr(self.config, 'max_position_embeddings', 'not set')}")
         
-        base_model = AutoModel.from_pretrained(
-            model_path, config=self.config
-        )
+        # Use the working approach from the successful code
+        if "modernbert" in model_path.lower():
+            # For ModernBERT, use AutoModel with explicit config loading like the working example
+            from transformers import AutoModel
+            self.roberta_encoder = AutoModel.from_pretrained(
+                model_path, 
+                config=self.config,
+                add_pooling_layer=False  # Key difference from original
+            )
+        else:
+            # For RoBERTa, use the original approach
+            base_model = AutoModel.from_pretrained(
+                model_path, config=self.config
+            )
+            self.roberta_encoder = base_model
         
-        print(f"[DEBUG INIT] Model type: {type(base_model)}")
-
-        #if use_peft:
-            # LoRA PEFT config for now
-        #    peft_config = LoraConfig(
-        #        task_type=TaskType.SEQ_CLS,
-        #        inference_mode=False,
-        #        r=8,
-        #        lora_alpha=32,
-        #        lora_dropout=0.1,
-        #    )
-        #    self.roberta_encoder = get_peft_model(base_model, peft_config)
-        #else:
-        self.roberta_encoder = base_model
+        print(f"[DEBUG INIT] Model type: {type(self.roberta_encoder)}")
         print(f"[DEBUG INIT] Model initialization complete")
 
         if cross_attention:
@@ -318,11 +317,20 @@ class PLMICD(nn.Module):
         reshaped_input_ids = input_ids.view(-1, chunk_size)
         reshaped_attention_masks = attention_masks.view(-1, chunk_size) if attention_masks is not None else None
         
-        # Use the safe encoder wrapper with all-padding fix
-        outputs = self._call_encoder_safely(
-            input_ids=reshaped_input_ids,
-            attention_mask=reshaped_attention_masks,
-        )
+        # Try the simple direct call approach that works in the reference code
+        if not hasattr(self.roberta_encoder, 'encoder'):
+            # ModernBERT - use simple direct call like the working example
+            outputs = self.roberta_encoder(
+                input_ids=reshaped_input_ids,
+                attention_mask=reshaped_attention_masks,
+                return_dict=False,
+            )
+        else:
+            # RoBERTa - use the safe encoder wrapper 
+            outputs = self._call_encoder_safely(
+                input_ids=reshaped_input_ids,
+                attention_mask=reshaped_attention_masks,
+            )
         
         final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
         return final_output
