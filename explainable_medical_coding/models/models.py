@@ -262,13 +262,12 @@ class PLMICD(nn.Module):
                 return_dict=False,
             )
         else:
-            # ModernBERT style call - try with autocast disabled to avoid mixed precision issues
-            with torch.cuda.amp.autocast(enabled=False):
-                outputs = self.roberta_encoder(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    return_dict=False,
-                )
+            # ModernBERT style call
+            outputs = self.roberta_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                return_dict=False,
+            )
         
         # Check for NaN in outputs
         if torch.isnan(outputs[0]).any():
