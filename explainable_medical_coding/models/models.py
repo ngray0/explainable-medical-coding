@@ -531,20 +531,20 @@ class PLMICD(nn.Module):
                 attention_mask = attention_mask[:, :truncated_len]
                 
             # Reshape to chunks
-            input_ids = input_ids.view(batch_size, max_chunks, self.chunk_size)
+            input_ids = input_ids.reshape(batch_size, max_chunks, self.chunk_size)
             if attention_mask is not None:
-                attention_mask = attention_mask.view(batch_size, max_chunks, self.chunk_size)
+                attention_mask = attention_mask.reshape(batch_size, max_chunks, self.chunk_size)
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         outputs = self.roberta_encoder(
-            input_ids.view(-1, chunk_size),
-            attention_mask=attention_mask.view(-1, chunk_size)
+            input_ids.reshape(-1, chunk_size),
+            attention_mask=attention_mask.reshape(-1, chunk_size)
             if attention_mask is not None
             else None,
             return_dict=False,
         )
 
-        hidden_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
+        hidden_output = outputs[0].reshape(batch_size, num_chunks * chunk_size, -1)
         logits = self.attention(hidden_output)
         return logits
 
