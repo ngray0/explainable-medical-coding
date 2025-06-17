@@ -155,7 +155,7 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 # Snapshot AFTER optimiser step and show progress for first 50 batches
-                after = param_ref[0, :5].detach().cpu()
+                after = param_ref[0, :5].detach().cpu().clone()
                 delta = (after - before).abs().max().item()
 
                 if batch_idx < 50:
