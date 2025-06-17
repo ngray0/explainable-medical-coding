@@ -143,6 +143,73 @@ class PLMICD(nn.Module):
         )
         return input_sequence.view(batch_size, -1, self.chunk_size)
 
+    def filter_valid_chunks(
+        self, input_ids: torch.Tensor, attention_masks: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Filter out chunks that have all-zero attention masks.
+        
+        Args:
+            input_ids (torch.Tensor): chunked input ids (batch_size, num_chunks, chunk_size)
+            attention_masks (torch.Tensor): chunked attention masks (batch_size, num_chunks, chunk_size)
+            
+        Returns:
+            tuple: (filtered_input_ids, filtered_attention_masks, chunk_indices)
+                - filtered_input_ids: (batch_size * valid_chunks, chunk_size)
+                - filtered_attention_masks: (batch_size * valid_chunks, chunk_size) 
+                - chunk_indices: (batch_size * valid_chunks,) - indices to reconstruct original shape
+        """
+        batch_size, num_chunks, chunk_size = input_ids.shape
+        
+        # Check which chunks have non-zero attention masks
+        chunk_attention_sums = attention_masks.sum(dim=2)  # (batch_size, num_chunks)
+        valid_chunks_mask = chunk_attention_sums > 0  # (batch_size, num_chunks)
+        
+        # Get indices of valid chunks for reconstruction
+        batch_indices = torch.arange(batch_size, device=input_ids.device).unsqueeze(1).expand(-1, num_chunks)
+        chunk_indices = torch.arange(num_chunks, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+        
+        # Extract valid chunks
+        valid_input_ids = input_ids[valid_chunks_mask]  # (num_valid_chunks, chunk_size)
+        valid_attention_masks = attention_masks[valid_chunks_mask]  # (num_valid_chunks, chunk_size)
+        valid_batch_indices = batch_indices[valid_chunks_mask]  # (num_valid_chunks,)
+        valid_chunk_indices = chunk_indices[valid_chunks_mask]  # (num_valid_chunks,)
+        
+        # Create reconstruction indices combining batch and chunk info
+        reconstruction_indices = valid_batch_indices * num_chunks + valid_chunk_indices
+        
+        return valid_input_ids, valid_attention_masks, reconstruction_indices
+
+    def reconstruct_from_valid_chunks(
+        self, outputs: torch.Tensor, reconstruction_indices: torch.Tensor,
+        batch_size: int, num_chunks: int, hidden_size: int
+    ) -> torch.Tensor:
+        """Reconstruct full output tensor from valid chunks, filling invalid chunks with zeros.
+        
+        Args:
+            outputs (torch.Tensor): outputs from valid chunks (num_valid_chunks, chunk_size, hidden_size)
+            reconstruction_indices (torch.Tensor): indices for reconstruction (num_valid_chunks,)
+            batch_size (int): original batch size
+            num_chunks (int): original number of chunks
+            hidden_size (int): hidden dimension size
+            
+        Returns:
+            torch.Tensor: reconstructed output (batch_size, num_chunks * chunk_size, hidden_size)
+        """
+        chunk_size = outputs.shape[1]
+        total_chunks = batch_size * num_chunks
+        
+        # Create full output tensor filled with zeros
+        full_outputs = torch.zeros(
+            total_chunks, chunk_size, hidden_size,
+            device=outputs.device, dtype=outputs.dtype
+        )
+        
+        # Fill in the valid chunks
+        full_outputs[reconstruction_indices] = outputs
+        
+        # Reshape to final format
+        return full_outputs.view(batch_size, num_chunks * chunk_size, hidden_size)
+
     def roberta_encode_embedding_input(self, embedding, attention_masks):
         # Generic approach that works for both RoBERTa and ModernBERT
         if hasattr(self.roberta_encoder, 'encoder'):
@@ -340,16 +407,40 @@ class PLMICD(nn.Module):
             
         batch_size, num_chunks, chunk_size = input_ids.size()
         
-        # Use the working pattern from successful code
-        outputs = self.roberta_encoder(
-            input_ids.view(-1, chunk_size),
-            attention_mask=attention_masks.view(-1, chunk_size)
-            if attention_masks is not None
-            else None,
-            return_dict=False,
-        )
+        # Filter out chunks with all-zero attention masks
+        if attention_masks is not None:
+            valid_input_ids, valid_attention_masks, reconstruction_indices = self.filter_valid_chunks(
+                input_ids, attention_masks
+            )
+            
+            # Only process valid chunks
+            if valid_input_ids.shape[0] > 0:
+                outputs = self.roberta_encoder(
+                    valid_input_ids,
+                    attention_mask=valid_attention_masks,
+                    return_dict=False,
+                )
+                
+                # Reconstruct full output with zeros for invalid chunks
+                final_output = self.reconstruct_from_valid_chunks(
+                    outputs[0], reconstruction_indices, batch_size, num_chunks, outputs[0].shape[-1]
+                )
+            else:
+                # All chunks were invalid - return zeros
+                hidden_size = self.config.hidden_size
+                final_output = torch.zeros(
+                    batch_size, num_chunks * chunk_size, hidden_size,
+                    device=input_ids.device, dtype=torch.float
+                )
+        else:
+            # No attention mask provided - process all chunks
+            outputs = self.roberta_encoder(
+                input_ids.view(-1, chunk_size),
+                attention_mask=None,
+                return_dict=False,
+            )
+            final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
         
-        final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
         return final_output
 
     def forward_with_input_masking(
@@ -520,8 +611,7 @@ class PLMICD(nn.Module):
                 pad_len = self.chunk_size - seq_len
                 input_ids = torch.nn.functional.pad(input_ids, (0, pad_len), value=self.pad_token_id)
                 if attention_mask is not None:
-                    # Use 1 instead of 0 for attention mask padding to prevent all-zero chunks
-                    attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=1)
+                    attention_mask = torch.nn.functional.pad(attention_mask, (0, pad_len), value=0)
                 seq_len = self.chunk_size
             
             # Truncate to exact multiple of chunk_size
@@ -537,13 +627,40 @@ class PLMICD(nn.Module):
 
         batch_size, num_chunks, chunk_size = input_ids.size()
         
-        outputs = self.roberta_encoder(
-            input_ids.reshape(-1, chunk_size),
-            attention_mask=attention_mask.reshape(-1, chunk_size) if attention_mask is not None else None,
-            return_dict=False,
-        )
+        # Filter out chunks with all-zero attention masks
+        if attention_mask is not None:
+            valid_input_ids, valid_attention_masks, reconstruction_indices = self.filter_valid_chunks(
+                input_ids, attention_mask
+            )
+            
+            # Only process valid chunks
+            if valid_input_ids.shape[0] > 0:
+                outputs = self.roberta_encoder(
+                    valid_input_ids,
+                    attention_mask=valid_attention_masks,
+                    return_dict=False,
+                )
+                
+                # Reconstruct full output with zeros for invalid chunks
+                hidden_output = self.reconstruct_from_valid_chunks(
+                    outputs[0], reconstruction_indices, batch_size, num_chunks, outputs[0].shape[-1]
+                )
+            else:
+                # All chunks were invalid - return zeros
+                hidden_size = self.config.hidden_size
+                hidden_output = torch.zeros(
+                    batch_size, num_chunks * chunk_size, hidden_size,
+                    device=input_ids.device, dtype=torch.float
+                )
+        else:
+            # No attention mask provided - process all chunks
+            outputs = self.roberta_encoder(
+                input_ids.reshape(-1, chunk_size),
+                attention_mask=None,
+                return_dict=False,
+            )
+            hidden_output = outputs[0].reshape(batch_size, num_chunks * chunk_size, -1)
         
-        hidden_output = outputs[0].reshape(batch_size, num_chunks * chunk_size, -1)
         logits = self.attention(hidden_output)
         
         return logits
