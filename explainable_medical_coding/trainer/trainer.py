@@ -84,20 +84,33 @@ class Trainer:
         self.on_end()
 
     def train_one_epoch(self, epoch: int) -> None:
-        """Train the model for one epoch.
-
-        Args:
-            epoch (int): The current epoch.
-        """
         self.model.train()
         self.on_train_begin()
+
+        # ── DEBUG: choose a parameter you expect to update every step
+        # If ModernBERT follows BERT naming, this will exist; otherwise
+        # pick any param that has requires_grad=True.
+        # Check embedding layer requires_grad based on model type
+        if hasattr(self.model.roberta_encoder.embeddings, 'tok_embeddings'):
+            # ModernBERT
+            print(f"tok_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.tok_embeddings.weight.requires_grad}")
+            param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
+        else:
+            # RoBERTa
+            print(f"word_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.word_embeddings.weight.requires_grad}")
+            param_ref = self.model.roberta_encoder.embeddings.word_embeddings.weight
+
+        # Or check all embedding-related parameters
+        print("\nEmbedding parameters and their requires_grad status:")
+        for name, param in self.model.named_parameters():
+            if 'embedding' in name.lower():
+                print(f"{name}: requires_grad={param.requires_grad}")
+
         num_batches = len(self.dataloaders["train"])
         for batch_idx, batch in enumerate(
             track(self.dataloaders["train"], description=f"Epoch: {epoch} | Training")
         ):
-            with torch.autocast(
-                device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
-            ):
+            with torch.autocast(device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16):
                 batch = batch.to(self.device)
                 y_probs, targets, loss = self.loss_function(
                     batch,
@@ -106,27 +119,53 @@ class Trainer:
                     epoch=epoch,
                 )
                 loss = loss / self.accumulate_grad_batches
-            self.gradient_scaler.scale(loss).backward()
+
+            # Scale and compute gradients
+            scaled_loss = self.gradient_scaler.scale(loss)
+            scaled_loss.backward()
+
             if ((batch_idx + 1) % self.accumulate_grad_batches == 0) or (
                 batch_idx + 1 == num_batches
             ):
-                if self.config.trainer.clip_grad_norm:
+                # Snapshot BEFORE optimiser step for gradient monitoring
+                before = param_ref[0, :5].detach().cpu().clone()
+                
+                # Unscale gradients first to get true gradient norm
+                if self.use_amp:
                     self.gradient_scaler.unscale_(self.optimizer)
-                    # torch.nn.utils.clip_grad_value_(norm=self.model.parameters(), clip_value=self.config.trainer.clip_value)
+                
+                # Calculate gradient norm
+                if param_ref.grad is not None:
+                    grad_norm = param_ref.grad.data.norm().item()
+                else:
+                    grad_norm = 0.0
+
+                # Additional gradient clipping if configured
+                if self.config.trainer.clip_grad_norm:
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), self.config.trainer.clip_grad_norm
                     )
+
                 self.gradient_scaler.step(self.optimizer)
                 self.gradient_scaler.update()
-                if self.lr_scheduler is not None:
-                    if not isinstance(
-                        self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                    ):
-                        self.lr_scheduler.step()
+                if self.lr_scheduler is not None and not isinstance(
+                    self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                ):
+                    self.lr_scheduler.step()
                 self.optimizer.zero_grad()
-            self.update_metrics(
-                y_probs=y_probs, targets=targets, loss=loss, split_name="train"
-            )
+
+                # Snapshot AFTER optimiser step and show progress for first 50 batches
+                after = param_ref[0, :5].detach().cpu().clone()
+                delta = (after - before).abs().max().item()
+
+                if batch_idx < 50:
+                    print(
+                        f"[Epoch {epoch} | Batch {batch_idx}] "
+                        f"grad_norm={grad_norm:.4f}  Δmax={delta:.6e}"
+                    )
+
+            self.update_metrics(y_probs=y_probs, targets=targets, loss=loss, split_name="train")
+
         self.on_train_end(epoch)
 
     @torch.no_grad()
