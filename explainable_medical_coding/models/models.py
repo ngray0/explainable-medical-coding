@@ -403,18 +403,26 @@ class PLMICD(nn.Module):
         input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
         
         if attention_masks is not None:
+            print(f"DEBUG: attention_masks provided - shape: {attention_masks.shape}")
             attention_masks = self.get_chunked_attention_masks(attention_masks)
+            print(f"DEBUG: chunked attention_masks - shape: {attention_masks.shape}")
+        else:
+            print("DEBUG: No attention_masks provided")
             
         batch_size, num_chunks, chunk_size = input_ids.size()
+        print(f"DEBUG: batch_size={batch_size}, num_chunks={num_chunks}, chunk_size={chunk_size}")
         
         # Filter out chunks with all-zero attention masks
         if attention_masks is not None:
+            print("DEBUG: Entering attention_masks branch (filtering valid chunks)")
             valid_input_ids, valid_attention_masks, reconstruction_indices = self.filter_valid_chunks(
                 input_ids, attention_masks
             )
+            print(f"DEBUG: valid_input_ids.shape[0] = {valid_input_ids.shape[0]}")
             
             # Only process valid chunks
             if valid_input_ids.shape[0] > 0:
+                print("DEBUG: Processing valid chunks with roberta_encoder")
                 outputs = self.roberta_encoder(
                     valid_input_ids,
                     attention_mask=valid_attention_masks,
@@ -422,11 +430,13 @@ class PLMICD(nn.Module):
                 )
                 
                 # Reconstruct full output with zeros for invalid chunks
+                print("DEBUG: Reconstructing output from valid chunks")
                 final_output = self.reconstruct_from_valid_chunks(
                     outputs[0], reconstruction_indices, batch_size, num_chunks, outputs[0].shape[-1]
                 )
             else:
                 # All chunks were invalid - return zeros
+                print("DEBUG: All chunks were invalid - returning zeros")
                 hidden_size = self.config.hidden_size
                 final_output = torch.zeros(
                     batch_size, num_chunks * chunk_size, hidden_size,
@@ -434,6 +444,7 @@ class PLMICD(nn.Module):
                 )
         else:
             # No attention mask provided - process all chunks
+            print("DEBUG: No attention mask - processing all chunks directly")
             outputs = self.roberta_encoder(
                 input_ids.view(-1, chunk_size),
                 attention_mask=None,
@@ -441,6 +452,7 @@ class PLMICD(nn.Module):
             )
             final_output = outputs[0].view(batch_size, num_chunks * chunk_size, -1)
         
+        print(f"DEBUG: final_output shape: {final_output.shape}")
         return final_output
 
     def forward_with_input_masking(
