@@ -130,8 +130,41 @@ class WandbCallback(BaseCallback):
         nested_dict: dict[str, Any],
         epoch: int,
     ) -> None:
-        nested_dict["epoch"] = epoch
-        wandb.log(nested_dict)  # type: ignore  # noqa
+        # Flatten nested results for better wandb visualization
+        flattened_dict = self._flatten_results_for_wandb(nested_dict)
+        flattened_dict["epoch"] = epoch
+        wandb.log(flattened_dict)  # type: ignore  # noqa
+
+    def _flatten_results_for_wandb(self, nested_dict: dict[str, Any]) -> dict[str, Any]:
+        """Flatten nested results dictionary for better wandb logging."""
+        flattened = {}
+        
+        for split_name, split_results in nested_dict.items():
+            if split_name == "epoch":
+                continue
+                
+            if isinstance(split_results, dict):
+                # Check if this is the new nested structure (with code systems)
+                if any(isinstance(v, dict) for v in split_results.values()):
+                    # New structure: split -> code_system -> metrics
+                    for code_system, metrics in split_results.items():
+                        if isinstance(metrics, dict):
+                            for metric_name, metric_value in metrics.items():
+                                key = f"{split_name}/{code_system}/{metric_name}"
+                                flattened[key] = metric_value
+                        else:
+                            key = f"{split_name}/{code_system}"
+                            flattened[key] = metrics
+                else:
+                    # Old structure: split -> metrics
+                    for metric_name, metric_value in split_results.items():
+                        key = f"{split_name}/{metric_name}"
+                        flattened[key] = metric_value
+            else:
+                # Direct value
+                flattened[split_name] = split_results
+                
+        return flattened
 
     def on_end(self, trainer=None):
         wandb.finish()

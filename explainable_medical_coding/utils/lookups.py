@@ -38,6 +38,11 @@ def create_lookups(
         split2code_indices=split2code_indices,
     )
 
+    # Create code system mappings for diagnosis vs procedure codes
+    code_system2code_indices = create_code_system_mappings(dataset, target_tokenizer)
+    if code_system2code_indices:
+        data_info["code_system2code_indices"] = code_system2code_indices
+
     return Lookups(
         data_info=data_info,
         split2code_indices=split2code_indices,
@@ -100,3 +105,40 @@ def get_data_info(
     data_info["eos_target_id"] = eos_target_id
 
     return data_info
+
+
+def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTokenizer) -> dict[str, torch.Tensor]:
+    """Create mappings for diagnosis vs procedure codes based on source columns."""
+    code_system2code_indices = {}
+    
+    # Get all unique codes by their source columns
+    diagnosis_codes = set()
+    procedure_codes = set()
+    
+    for split_name, data in dataset.items():
+        # Extract diagnosis codes from diagnosis_codes column
+        if "diagnosis_codes" in data.column_names:
+            df = data.with_format("pandas")
+            diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
+            diagnosis_codes.update(diag_codes)
+        
+        # Extract procedure codes from procedure_codes column
+        if "procedure_codes" in data.column_names:
+            df = data.with_format("pandas")
+            proc_codes = df["procedure_codes"].explode().dropna().unique().tolist()
+            procedure_codes.update(proc_codes)
+    
+    # Convert to target indices
+    if diagnosis_codes:
+        valid_diag_codes = [code for code in diagnosis_codes if code in target_tokenizer.target2id]
+        if valid_diag_codes:
+            diag_target_ids = target_tokenizer(valid_diag_codes)
+            code_system2code_indices["diagnosis"] = torch.tensor(diag_target_ids)
+    
+    if procedure_codes:
+        valid_proc_codes = [code for code in procedure_codes if code in target_tokenizer.target2id]
+        if valid_proc_codes:
+            proc_target_ids = target_tokenizer(valid_proc_codes)
+            code_system2code_indices["procedure"] = torch.tensor(proc_target_ids)
+    
+    return code_system2code_indices
