@@ -217,6 +217,72 @@ def get_metric_collections(
     return metric_collections
 
 
+def get_code_system_metric_collections(
+    config: OmegaConf,
+    number_of_classes: int,
+    code_system2code_indices: dict[str, torch.Tensor],
+    split_names: list[str] = ["train", "train_val", "validation", "test"],
+    split2code_indices: Optional[dict[str, torch.Tensor]] = None,
+    autoregressive: bool = False,
+) -> dict[str, dict[str, metrics.MetricCollection]]:
+    """Create metric collections for each code system (diagnosis/procedure) and split combination.
+    
+    Args:
+        config: Configuration for metrics
+        number_of_classes: Total number of classes
+        code_system2code_indices: Mapping from code system to code indices
+        split_names: List of split names
+        split2code_indices: Optional mapping from split to code indices
+        autoregressive: Whether using autoregressive models
+        
+    Returns:
+        Nested dictionary with structure: {split_name: {code_system: MetricCollection}}
+    """
+    metric_collections: dict[str, dict[str, metrics.MetricCollection]] = {}
+    
+    for split_name in split_names:
+        metric_collections[split_name] = {}
+        
+        # Get split-specific code indices if available
+        if split2code_indices is not None:
+            split_code_indices = split2code_indices.get(split_name)
+        else:
+            split_code_indices = None
+        
+        # Create combined metric collection (original behavior)
+        metric_collections[split_name]["combined"] = get_metric_collection(
+            config=config,
+            number_of_classes=number_of_classes,
+            split_code_indices=split_code_indices,
+            autoregressive=autoregressive,
+        )
+        
+        # Create separate metric collections for each code system
+        for code_system, code_indices in code_system2code_indices.items():
+            # If we have split-specific filtering, intersect with code system indices
+            if split_code_indices is not None:
+                # Find intersection of split codes and code system codes
+                intersect_indices = torch.tensor([
+                    idx for idx in split_code_indices 
+                    if idx in code_indices
+                ])
+                if len(intersect_indices) > 0:
+                    system_code_indices = intersect_indices
+                else:
+                    system_code_indices = None
+            else:
+                system_code_indices = code_indices
+            
+            metric_collections[split_name][code_system] = get_metric_collection(
+                config=config,
+                number_of_classes=number_of_classes,
+                split_code_indices=system_code_indices,
+                autoregressive=autoregressive,
+            )
+    
+    return metric_collections
+
+
 def get_callbacks(config: OmegaConf) -> list[callbacks.BaseCallback]:
     callbacks_list = []
     for callback in config:

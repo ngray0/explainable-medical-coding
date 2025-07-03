@@ -27,6 +27,12 @@ def create_lookups(
     split2code_indices = create_split2target_indices_lookup(
         dataset, target_tokenizer=target_tokenizer
     )
+    
+    # Create code system mappings for diagnosis vs procedure codes
+    code_system2code_indices = create_code_system_mappings(
+        dataset, target_tokenizer=target_tokenizer
+    )
+    
     data_info = get_data_info(
         dataset=dataset,
         vocab_size=len(text_tokenizer),
@@ -36,6 +42,7 @@ def create_lookups(
         eos_target_id=target_tokenizer.eos_id,
         num_classes=len(target_tokenizer),
         split2code_indices=split2code_indices,
+        code_system2code_indices=code_system2code_indices,
     )
 
     return Lookups(
@@ -43,6 +50,51 @@ def create_lookups(
         split2code_indices=split2code_indices,
         target_tokenizer=target_tokenizer,
     )
+
+
+def create_code_system_mappings(
+    dataset: DatasetDict, target_tokenizer: TargetTokenizer
+) -> dict[str, torch.Tensor]:
+    """Create mappings for diagnosis vs procedure codes based on source columns.
+    
+    Args:
+        dataset: The dataset containing diagnosis_codes and procedure_codes
+        target_tokenizer: The target tokenizer
+        
+    Returns:
+        Dictionary mapping code systems to their indices
+    """
+    code_system2code_indices = {}
+    
+    # Get all unique codes by their source columns
+    diagnosis_codes = set()
+    procedure_codes = set()
+    
+    for split_name, data in dataset.items():
+        df = data.with_format("pandas")
+        
+        # Extract diagnosis codes from diagnosis_codes column
+        if "diagnosis_codes" in df.columns:
+            diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
+            diagnosis_codes.update(diag_codes)
+        
+        # Extract procedure codes from procedure_codes column
+        if "procedure_codes" in df.columns:
+            proc_codes = df["procedure_codes"].explode().dropna().unique().tolist()
+            procedure_codes.update(proc_codes)
+    
+    # Convert to target indices
+    if diagnosis_codes:
+        diag_target_ids = target_tokenizer([code for code in diagnosis_codes if code in target_tokenizer.target2id])
+        if diag_target_ids:
+            code_system2code_indices["diagnosis"] = torch.tensor(diag_target_ids)
+    
+    if procedure_codes:
+        proc_target_ids = target_tokenizer([code for code in procedure_codes if code in target_tokenizer.target2id])
+        if proc_target_ids:
+            code_system2code_indices["procedure"] = torch.tensor(proc_target_ids)
+    
+    return code_system2code_indices
 
 
 def create_split2target_indices_lookup(
@@ -68,6 +120,7 @@ def get_data_info(
     eos_target_id: Optional[int],
     num_classes: int,
     split2code_indices: dict[str, list],
+    code_system2code_indices: Optional[dict[str, torch.Tensor]] = None,
 ) -> dict:
     data_info: dict[str, Any] = {}
     data_info["num_examples"] = (
@@ -98,5 +151,9 @@ def get_data_info(
     data_info["pad_target_id"] = pad_target_id
     data_info["sos_target_id"] = sos_target_id
     data_info["eos_target_id"] = eos_target_id
-
+    
+    # Add code system information
+    if code_system2code_indices:
+        data_info["code_system2code_indices"] = code_system2code_indices
+    
     return data_info

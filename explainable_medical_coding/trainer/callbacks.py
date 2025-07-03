@@ -130,8 +130,49 @@ class WandbCallback(BaseCallback):
         nested_dict: dict[str, Any],
         epoch: int,
     ) -> None:
-        nested_dict["epoch"] = epoch
-        wandb.log(nested_dict)  # type: ignore  # noqa
+        # Flatten nested results for better wandb visualization
+        flattened_dict = self._flatten_results_for_wandb(nested_dict)
+        flattened_dict["epoch"] = epoch
+        wandb.log(flattened_dict)  # type: ignore  # noqa
+
+    def _flatten_results_for_wandb(self, nested_dict: dict[str, Any]) -> dict[str, Any]:
+        """Flatten nested results dictionary for better wandb logging.
+        
+        Converts structure like:
+        {"validation": {"combined": {"f1_micro": 0.85}, "diagnosis": {"f1_micro": 0.87}}}
+        
+        To:
+        {"validation/combined/f1_micro": 0.85, "validation/diagnosis/f1_micro": 0.87}
+        """
+        flattened = {}
+        
+        for split_name, split_results in nested_dict.items():
+            if split_name == "epoch":
+                continue
+                
+            if isinstance(split_results, dict):
+                # Check if this is the new nested structure (with code systems)
+                if any(isinstance(v, dict) for v in split_results.values()):
+                    # New structure: split -> code_system -> metrics
+                    for code_system, metrics in split_results.items():
+                        if isinstance(metrics, dict):
+                            for metric_name, metric_value in metrics.items():
+                                key = f"{split_name}/{code_system}/{metric_name}"
+                                flattened[key] = metric_value
+                        else:
+                            # Single metric value
+                            key = f"{split_name}/{code_system}"
+                            flattened[key] = metrics
+                else:
+                    # Old structure: split -> metrics
+                    for metric_name, metric_value in split_results.items():
+                        key = f"{split_name}/{metric_name}"
+                        flattened[key] = metric_value
+            else:
+                # Direct value
+                flattened[split_name] = split_results
+                
+        return flattened
 
     def on_end(self, trainer=None):
         wandb.finish()
@@ -143,13 +184,21 @@ class SaveBestModelCallback(BaseCallback):
         self.config = config
         self.prev_best = None
         self.split_name = config.split
-        self.target_name = config.target
+        self.target_name = getattr(config, 'target', 'combined')  # Default to combined
         self.metric_name = config.metric
 
     def on_epoch_end(self, trainer=None):
-        best_metric = trainer.metric_collections[self.split_name].get_best_metric(
-            self.metric_name
-        )
+        # Handle both old and new metric collection structures
+        if isinstance(trainer.metric_collections[self.split_name], dict):
+            # New structure: use the specified target (code system)
+            metric_collection = trainer.metric_collections[self.split_name][self.target_name]
+            best_metric = metric_collection.get_best_metric(self.metric_name)
+        else:
+            # Old structure
+            best_metric = trainer.metric_collections[self.split_name].get_best_metric(
+                self.metric_name
+            )
+            
         if self.prev_best is None or best_metric != self.prev_best:
             self.prev_best = best_metric
             trainer.save_checkpoint("best_model.pt")
@@ -165,7 +214,7 @@ class EarlyStoppingCallback(BaseCallback):
         super().__init__()
         self.config = config
         self.split_name = config.split
-        self.target_name = config.target
+        self.target_name = getattr(config, 'target', 'combined')  # Default to combined
         self.metric_name = config.metric
         self.patience = config.patience
         self.counter = 0
@@ -177,9 +226,17 @@ class EarlyStoppingCallback(BaseCallback):
         Args:
             trainer (Trainer, optional): Trainer class. Defaults to None.
         """
-        best_metric = trainer.metric_collections[self.split_name].get_best_metric(
-            self.metric_name
-        )
+        # Handle both old and new metric collection structures
+        if isinstance(trainer.metric_collections[self.split_name], dict):
+            # New structure: use the specified target (code system)
+            metric_collection = trainer.metric_collections[self.split_name][self.target_name]
+            best_metric = metric_collection.get_best_metric(self.metric_name)
+        else:
+            # Old structure
+            best_metric = trainer.metric_collections[self.split_name].get_best_metric(
+                self.metric_name
+            )
+            
         if self.prev_best is None or best_metric != self.prev_best:
             self.prev_best = best_metric
             self.counter = 0

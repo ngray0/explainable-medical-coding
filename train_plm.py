@@ -150,12 +150,24 @@ def main(cfg: OmegaConf) -> None:
         pad_token_id=lookups.data_info["pad_token_id"],
     )
 
-    metric_collections = factories.get_metric_collections(
-        config=cfg.metrics,
-        number_of_classes=lookups.data_info["num_classes"],
-        split2code_indices=lookups.split2code_indices,
-        autoregressive=cfg.model.autoregressive,
-    )
+    # Check if we have code system mappings and create appropriate metric collections
+    if "code_system2code_indices" in lookups.data_info:
+        # Use code system-aware evaluation
+        metric_collections = factories.get_code_system_metric_collections(
+            config=cfg.metrics,
+            number_of_classes=lookups.data_info["num_classes"],
+            code_system2code_indices=lookups.data_info["code_system2code_indices"],
+            split2code_indices=lookups.split2code_indices,
+            autoregressive=cfg.model.autoregressive,
+        )
+    else:
+        # Use traditional evaluation
+        metric_collections = factories.get_metric_collections(
+            config=cfg.metrics,
+            number_of_classes=lookups.data_info["num_classes"],
+            split2code_indices=lookups.split2code_indices,
+            autoregressive=cfg.model.autoregressive,
+        )
 
     optimizer = factories.get_optimizer(config=cfg.optimizer, model=model)
     accumulate_grad_batches = int(

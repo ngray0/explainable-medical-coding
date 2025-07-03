@@ -25,7 +25,7 @@ class Trainer:
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         dataloaders: dict[str, DataLoader],
-        metric_collections: dict[str, MetricCollection],
+        metric_collections: dict[str, MetricCollection] | dict[str, dict[str, MetricCollection]],
         callbacks: list[BaseCallback],
         lookups: Lookups,
         loss_function: Callable,
@@ -206,7 +206,14 @@ class Trainer:
         loss: torch.Tensor,
         split_name: str,
     ) -> None:
-        self.metric_collections[split_name].update(y_probs, targets, loss)
+        # Check if we have nested metric collections (code system separation)
+        if isinstance(self.metric_collections[split_name], dict):
+            # Update all code system metric collections
+            for metric_collection in self.metric_collections[split_name].values():
+                metric_collection.update(y_probs, targets, loss)
+        else:
+            # Old structure: single metric collection
+            self.metric_collections[split_name].update(y_probs, targets, loss)
 
     def calculate_metrics(
         self,
@@ -216,29 +223,57 @@ class Trainer:
         evaluating_best_model: bool = False,
     ) -> dict[str, dict[str, torch.Tensor]]:
         results_dict: dict[str, dict[str, Any]] = defaultdict(dict)
-        if split_name == "validation":
-            results_dict[split_name] = self.metric_collections[split_name].compute()
+        
+        # Check if we have nested metric collections (code system separation)
+        if isinstance(self.metric_collections[split_name], dict):
+            # New structure: separate metrics for each code system
+            for code_system, metric_collection in self.metric_collections[split_name].items():
+                if split_name == "validation":
+                    code_system_results = metric_collection.compute()
+                else:
+                    code_system_results = metric_collection.compute(y_probs, targets)
+                results_dict[split_name][code_system] = code_system_results
         else:
-            results_dict[split_name] = self.metric_collections[split_name].compute(
-                y_probs, targets
-            )
+            # Old structure: single metric collection
+            if split_name == "validation":
+                results_dict[split_name] = self.metric_collections[split_name].compute()
+            else:
+                results_dict[split_name] = self.metric_collections[split_name].compute(
+                    y_probs, targets
+                )
 
         if self.threshold_tuning and split_name == "validation":
             best_result, best_db = f1_score_db_tuning(y_probs, targets)
-            results_dict[split_name] |= {"f1_micro_tuned": best_result}
+            # For nested structure, add to combined results
+            if isinstance(self.metric_collections[split_name], dict):
+                results_dict[split_name]["combined"] |= {"f1_micro_tuned": best_result}
+            else:
+                results_dict[split_name] |= {"f1_micro_tuned": best_result}
+            
             if evaluating_best_model:
                 pprint(f"Best threshold: {best_db}")
                 pprint(f"Best result: {best_result}")
-                self.metric_collections["test"].set_threshold(best_db)
+                # Set threshold for test set
+                if isinstance(self.metric_collections["test"], dict):
+                    self.metric_collections["test"]["combined"].set_threshold(best_db)
+                else:
+                    self.metric_collections["test"].set_threshold(best_db)
             self.best_db = best_db
         return results_dict
 
     def reset_metric(self, split_name: str) -> None:
-        self.metric_collections[split_name].reset_metrics()
+        # Check if we have nested metric collections (code system separation)
+        if isinstance(self.metric_collections[split_name], dict):
+            # Reset all code system metric collections
+            for metric_collection in self.metric_collections[split_name].values():
+                metric_collection.reset_metrics()
+        else:
+            # Old structure: single metric collection
+            self.metric_collections[split_name].reset_metrics()
 
     def reset_metrics(self) -> None:
         for split_name in self.metric_collections.keys():
-            self.metric_collections[split_name].reset_metrics()
+            self.reset_metric(split_name)
 
     def on_initialisation_end(self) -> None:
         for callback in self.callbacks:
