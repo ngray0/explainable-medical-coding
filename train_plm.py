@@ -151,16 +151,30 @@ def main(cfg: OmegaConf) -> None:
     )
 
     # Check if we have code system mappings and create appropriate metric collections
-    if "code_system2code_indices" in lookups.data_info:
-        # Use code system-aware evaluation
-        metric_collections = factories.get_code_system_metric_collections(
-            config=cfg.metrics,
-            number_of_classes=lookups.data_info["num_classes"],
-            code_system2code_indices=lookups.data_info["code_system2code_indices"],
-            split2code_indices=lookups.split2code_indices,
-            autoregressive=cfg.model.autoregressive,
-        )
+    if ("code_system2code_indices" in lookups.data_info and 
+        lookups.data_info["code_system2code_indices"]):
+        print("Using code system-aware evaluation")
+        try:
+            # Use code system-aware evaluation
+            metric_collections = factories.get_code_system_metric_collections(
+                config=cfg.metrics,
+                number_of_classes=lookups.data_info["num_classes"],
+                code_system2code_indices=lookups.data_info["code_system2code_indices"],
+                split2code_indices=lookups.split2code_indices,
+                autoregressive=cfg.model.autoregressive,
+            )
+        except Exception as e:
+            print(f"Failed to create code system-aware evaluation: {e}")
+            print("Falling back to traditional evaluation")
+            # Fallback to traditional evaluation
+            metric_collections = factories.get_metric_collections(
+                config=cfg.metrics,
+                number_of_classes=lookups.data_info["num_classes"],
+                split2code_indices=lookups.split2code_indices,
+                autoregressive=cfg.model.autoregressive,
+            )
     else:
+        print("Using traditional evaluation")
         # Use traditional evaluation
         metric_collections = factories.get_metric_collections(
             config=cfg.metrics,

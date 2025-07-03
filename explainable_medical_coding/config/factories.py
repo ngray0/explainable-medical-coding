@@ -261,15 +261,17 @@ def get_code_system_metric_collections(
         for code_system, code_indices in code_system2code_indices.items():
             # If we have split-specific filtering, intersect with code system indices
             if split_code_indices is not None:
-                # Find intersection of split codes and code system codes
-                intersect_indices = torch.tensor([
-                    idx for idx in split_code_indices 
-                    if idx in code_indices
-                ])
-                if len(intersect_indices) > 0:
-                    system_code_indices = intersect_indices
+                # Find intersection of split codes and code system codes using tensor operations
+                split_set = set(split_code_indices.tolist())
+                code_set = set(code_indices.tolist())
+                intersect_set = split_set.intersection(code_set)
+                
+                if len(intersect_set) > 0:
+                    system_code_indices = torch.tensor(list(intersect_set))
                 else:
-                    system_code_indices = None
+                    # No overlap between split codes and code system codes
+                    # Create empty tensor but still create the metric collection
+                    system_code_indices = torch.tensor([], dtype=torch.long)
             else:
                 system_code_indices = code_indices
             

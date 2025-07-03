@@ -386,7 +386,14 @@ class Trainer:
     def to(self, device: str) -> "Trainer":
         self.model.to(device)
         for split_name in self.metric_collections.keys():
-            self.metric_collections[split_name].to(device)
+            # Check if we have nested metric collections (code system separation)
+            if isinstance(self.metric_collections[split_name], dict):
+                # New structure: move all code system metric collections to device
+                for metric_collection in self.metric_collections[split_name].values():
+                    metric_collection.to(device)
+            else:
+                # Old structure: single metric collection
+                self.metric_collections[split_name].to(device)
         self.device = device
         return self
 

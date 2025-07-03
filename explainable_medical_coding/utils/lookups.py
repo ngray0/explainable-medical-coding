@@ -33,6 +33,14 @@ def create_lookups(
         dataset, target_tokenizer=target_tokenizer
     )
     
+    # Add debug logging
+    if code_system2code_indices:
+        print(f"Code system mappings created:")
+        for code_system, indices in code_system2code_indices.items():
+            print(f"  {code_system}: {len(indices)} codes")
+    else:
+        print("No code system mappings created - using traditional evaluation")
+    
     data_info = get_data_info(
         dataset=dataset,
         vocab_size=len(text_tokenizer),
