@@ -85,13 +85,15 @@ def create_code_system_mappings(
     
     # Convert to target indices
     if diagnosis_codes:
-        diag_target_ids = target_tokenizer([code for code in diagnosis_codes if code in target_tokenizer.target2id])
-        if diag_target_ids:
+        valid_diag_codes = [code for code in diagnosis_codes if code in target_tokenizer.target2id]
+        if valid_diag_codes:
+            diag_target_ids = target_tokenizer(valid_diag_codes)
             code_system2code_indices["diagnosis"] = torch.tensor(diag_target_ids)
     
     if procedure_codes:
-        proc_target_ids = target_tokenizer([code for code in procedure_codes if code in target_tokenizer.target2id])
-        if proc_target_ids:
+        valid_proc_codes = [code for code in procedure_codes if code in target_tokenizer.target2id]
+        if valid_proc_codes:
+            proc_target_ids = target_tokenizer(valid_proc_codes)
             code_system2code_indices["procedure"] = torch.tensor(proc_target_ids)
     
     return code_system2code_indices
