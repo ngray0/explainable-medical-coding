@@ -71,15 +71,15 @@ def create_code_system_mappings(
     procedure_codes = set()
     
     for split_name, data in dataset.items():
-        df = data.with_format("pandas")
-        
-        # Extract diagnosis codes from diagnosis_codes column
-        if "diagnosis_codes" in df.columns:
+        # Check if the dataset has the required columns
+        if "diagnosis_codes" in data.column_names:
+            df = data.with_format("pandas")
             diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
             diagnosis_codes.update(diag_codes)
         
         # Extract procedure codes from procedure_codes column
-        if "procedure_codes" in df.columns:
+        if "procedure_codes" in data.column_names:
+            df = data.with_format("pandas")
             proc_codes = df["procedure_codes"].explode().dropna().unique().tolist()
             procedure_codes.update(proc_codes)
     
