@@ -56,7 +56,7 @@ class PLMICD(nn.Module):
         )
 
         self.roberta_encoder = AutoModel.from_pretrained(
-            model_path, config=self.config, add_pooling_layer=False
+            model_path, config=self.config, trust_remote_code=True
         )
 
         if cross_attention:

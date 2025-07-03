@@ -91,15 +91,29 @@ class Trainer:
         # If ModernBERT follows BERT naming, this will exist; otherwise
         # pick any param that has requires_grad=True.
         # Check embedding layer requires_grad based on model type
-        if hasattr(self.model.roberta_encoder.embeddings, 'tok_embeddings'):
+        if hasattr(self.model.roberta_encoder, 'embeddings.tok_embeddings'):
             # ModernBERT
             print(f"tok_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.tok_embeddings.weight.requires_grad}")
             param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
-        else:
+        elif hasattr(self.model.roberta_encoder, 'embeddings.word_embeddings'):
             # RoBERTa
             print(f"word_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.word_embeddings.weight.requires_grad}")
             param_ref = self.model.roberta_encoder.embeddings.word_embeddings.weight
-
+        else:
+            # Automatically find first parameter with gradients
+            param_ref = None
+            for name, param in self.model.roberta_encoder.named_parameters():
+                if param.requires_grad:
+                    print(f"Found first parameter with grad: {name}, requires_grad: {param.requires_grad}")
+                    param_ref = param
+                    break
+            if param_ref is None:
+                print("Warning: No parameters with requires_grad=True found in roberta_encoder")
+                # Fallback: just get the first parameter
+                for name, param in self.model.roberta_encoder.named_parameters():
+                    print(f"Using first parameter as fallback: {name}")
+                    param_ref = param
+                    break
         # Or check all embedding-related parameters
         print("\nEmbedding parameters and their requires_grad status:")
         for name, param in self.model.named_parameters():
