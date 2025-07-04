@@ -111,34 +111,51 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
     """Create mappings for diagnosis vs procedure codes based on source columns."""
     code_system2code_indices = {}
     
-    # Get all unique codes by their source columns
-    diagnosis_codes = set()
-    procedure_codes = set()
+    # Create code system to code sets mapping (like medical-coding-reproducibility)
+    code_system2codes = {}
+    
+    # Check if we have separate code columns
+    has_diagnosis = False
+    has_procedure = False
     
     for split_name, data in dataset.items():
-        # Extract diagnosis codes from diagnosis_codes column
         if "diagnosis_codes" in data.column_names:
-            df = data.with_format("pandas")
-            diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
-            diagnosis_codes.update(diag_codes)
-        
-        # Extract procedure codes from procedure_codes column
+            has_diagnosis = True
         if "procedure_codes" in data.column_names:
-            df = data.with_format("pandas")
+            has_procedure = True
+        break  # Just need to check once
+    
+    if not (has_diagnosis or has_procedure):
+        print("No diagnosis_codes or procedure_codes columns found - using traditional evaluation")
+        return {}
+    
+    # Collect all codes by system across all splits
+    if has_diagnosis:
+        code_system2codes["diagnosis"] = set()
+    if has_procedure:
+        code_system2codes["procedure"] = set()
+    
+    for split_name, data in dataset.items():
+        df = data.with_format("pandas")
+        
+        # Extract diagnosis codes
+        if has_diagnosis and "diagnosis_codes" in df.columns:
+            diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
+            code_system2codes["diagnosis"].update(diag_codes)
+        
+        # Extract procedure codes
+        if has_procedure and "procedure_codes" in df.columns:
             proc_codes = df["procedure_codes"].explode().dropna().unique().tolist()
-            procedure_codes.update(proc_codes)
+            code_system2codes["procedure"].update(proc_codes)
     
-    # Convert to target indices
-    if diagnosis_codes:
-        valid_diag_codes = [code for code in diagnosis_codes if code in target_tokenizer.target2id]
-        if valid_diag_codes:
-            diag_target_ids = target_tokenizer(valid_diag_codes)
-            code_system2code_indices["diagnosis"] = torch.tensor(diag_target_ids)
-    
-    if procedure_codes:
-        valid_proc_codes = [code for code in procedure_codes if code in target_tokenizer.target2id]
-        if valid_proc_codes:
-            proc_target_ids = target_tokenizer(valid_proc_codes)
-            code_system2code_indices["procedure"] = torch.tensor(proc_target_ids)
+    # Convert to target indices for each code system
+    for code_system, codes in code_system2codes.items():
+        if codes:
+            # Get indices for codes that exist in the target tokenizer
+            valid_codes = [code for code in codes if code in target_tokenizer.target2id]
+            if valid_codes:
+                target_ids = target_tokenizer(valid_codes)
+                code_system2code_indices[code_system] = torch.tensor(target_ids)
+                print(f"Created {code_system} mapping with {len(target_ids)} codes")
     
     return code_system2code_indices

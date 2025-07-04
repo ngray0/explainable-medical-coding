@@ -25,7 +25,7 @@ class Trainer:
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         dataloaders: dict[str, DataLoader],
-        metric_collections: dict[str, MetricCollection],
+        metric_collections: dict[str, dict[str, MetricCollection]],
         callbacks: list[BaseCallback],
         lookups: Lookups,
         loss_function: Callable,
@@ -259,7 +259,10 @@ class Trainer:
         loss: torch.Tensor,
         split_name: str,
     ) -> None:
-        self.metric_collections[split_name].update(y_probs, targets, loss)
+        # Update all metric collections for this split in parallel
+        # Each collection will filter the tensors using its own code_indices during update()
+        for target_name in self.metric_collections[split_name].keys():
+            self.metric_collections[split_name][target_name].update(y_probs, targets, loss)
 
     def calculate_metrics(
         self,
@@ -268,62 +271,43 @@ class Trainer:
         targets: Optional[torch.Tensor] = None,
         evaluating_best_model: bool = False,
     ) -> dict[str, dict[str, torch.Tensor]]:
-        results_dict: dict[str, dict[str, Any]] = defaultdict(dict)
+        from collections import defaultdict
+        results_dict = defaultdict(dict)
         
-        # Check if we have code system mappings for separate evaluation
-        code_system_mappings = self.lookups.data_info.get("code_system2code_indices")
-        
-        if code_system_mappings:
-            # Multiple evaluations: combined + separate code systems
-            metric_collection = self.metric_collections[split_name]
-            
-            # 1. Combined evaluation (original behavior)
-            if split_name == "validation":
-                combined_results = metric_collection.compute()
-            else:
-                combined_results = metric_collection.compute(y_probs, targets)
-            results_dict[split_name]["combined"] = combined_results
-            
-            # 2. Separate evaluations for each code system
-            for code_system, code_indices in code_system_mappings.items():
-                # Create a temporary copy of the metric collection with filtered indices
-                filtered_collection = metric_collection.copy()
-                filtered_collection.code_indices = code_indices
-                filtered_collection.set_number_of_classes(len(code_indices))
-                
-                if split_name == "validation":
-                    code_system_results = filtered_collection.compute()
-                else:
-                    code_system_results = filtered_collection.compute(y_probs, targets)
-                results_dict[split_name][code_system] = code_system_results
+        # Calculate metrics for each target collection (all, diagnosis, procedure, etc.)
+        # Each collection has already accumulated filtered state during training/validation
+        if split_name == "validation":
+            # For validation, use accumulated state from training loop
+            for target_name in self.metric_collections[split_name].keys():
+                results_dict[split_name][target_name] = self.metric_collections[split_name][target_name].compute()
         else:
-            # Original single evaluation
-            if split_name == "validation":
-                results_dict[split_name] = self.metric_collections[split_name].compute()
-            else:
-                results_dict[split_name] = self.metric_collections[split_name].compute(
+            # For test/other splits, compute fresh metrics from tensors
+            for target_name in self.metric_collections[split_name].keys():
+                results_dict[split_name][target_name] = self.metric_collections[split_name][target_name].compute(
                     y_probs, targets
                 )
 
         if self.threshold_tuning and split_name == "validation":
             best_result, best_db = f1_score_db_tuning(y_probs, targets)
-            if code_system_mappings:
-                results_dict[split_name]["combined"] |= {"f1_micro_tuned": best_result}
-            else:
-                results_dict[split_name] |= {"f1_micro_tuned": best_result}
+            # Add tuned result to the "all" collection
+            results_dict[split_name]["all"] |= {"f1_micro_tuned": best_result}
             if evaluating_best_model:
                 pprint(f"Best threshold: {best_db}")
                 pprint(f"Best result: {best_result}")
-                self.metric_collections["test"].set_threshold(best_db)
+                # Set threshold for all test collections
+                for target_name in self.metric_collections["test"]:
+                    self.metric_collections["test"][target_name].set_threshold(best_db)
             self.best_db = best_db
         return results_dict
 
     def reset_metric(self, split_name: str) -> None:
-        self.metric_collections[split_name].reset_metrics()
+        for target_name in self.metric_collections[split_name]:
+            self.metric_collections[split_name][target_name].reset_metrics()
 
     def reset_metrics(self) -> None:
         for split_name in self.metric_collections.keys():
-            self.metric_collections[split_name].reset_metrics()
+            for target_name in self.metric_collections[split_name]:
+                self.metric_collections[split_name][target_name].reset_metrics()
 
     def on_initialisation_end(self) -> None:
         for callback in self.callbacks:
@@ -403,7 +387,7 @@ class Trainer:
                 self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
             ):
                 self.lr_scheduler.step(
-                    self.current_val_results["validation"]["f1_micro"]
+                    self.current_val_results["validation"]["all"]["f1_micro"]
                 )
 
         for callback in self.callbacks:
@@ -436,7 +420,8 @@ class Trainer:
     def to(self, device: str) -> "Trainer":
         self.model.to(device)
         for split_name in self.metric_collections.keys():
-            self.metric_collections[split_name].to(device)
+            for target_name in self.metric_collections[split_name]:
+                self.metric_collections[split_name][target_name].to(device)
         self.device = device
         return self
 

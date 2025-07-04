@@ -180,7 +180,7 @@ class SaveBestModelCallback(BaseCallback):
         self.metric_name = config.metric
 
     def on_epoch_end(self, trainer=None):
-        best_metric = trainer.metric_collections[self.split_name].get_best_metric(
+        best_metric = trainer.metric_collections[self.split_name][self.target_name].get_best_metric(
             self.metric_name
         )
         if self.prev_best is None or best_metric != self.prev_best:
@@ -210,7 +210,7 @@ class EarlyStoppingCallback(BaseCallback):
         Args:
             trainer (Trainer, optional): Trainer class. Defaults to None.
         """
-        best_metric = trainer.metric_collections[self.split_name].get_best_metric(
+        best_metric = trainer.metric_collections[self.split_name][self.target_name].get_best_metric(
             self.metric_name
         )
         if self.prev_best is None or best_metric != self.prev_best:

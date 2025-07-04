@@ -200,20 +200,66 @@ def get_metric_collections(
     split_names: list[str] = ["train", "train_val", "validation", "test"],
     split2code_indices: Optional[dict[str, torch.Tensor]] = None,
     autoregressive: bool = False,
-) -> dict[str, metrics.MetricCollection]:
-    metric_collections: dict[str, metrics.MetricCollection] = {}
+    code_system2code_indices: Optional[dict[str, torch.Tensor]] = None,
+) -> dict[str, dict[str, metrics.MetricCollection]]:
+    """Create metric collections with proper nested structure for code systems.
+    
+    Returns nested structure: {split_name: {target_name: MetricCollection}}
+    where target_name can be 'all', 'diagnosis', 'procedure', etc.
+    """
+    from collections import defaultdict
+    import numpy as np
+    
+    metric_collections: dict[str, dict[str, metrics.MetricCollection]] = defaultdict(dict)
+    
+    # Splits that should have multiple code system evaluations
+    splits_with_multiple_systems = {"train_val", "validation", "test"}
+    
     for split_name in split_names:
         if split2code_indices is not None:
             split_code_indices = split2code_indices.get(split_name)
         else:
             split_code_indices = None
 
-        metric_collections[split_name] = get_metric_collection(
+        # Always create "all" collection (combined evaluation)
+        metric_collections[split_name]["all"] = get_metric_collection(
             config=config,
             number_of_classes=number_of_classes,
             split_code_indices=split_code_indices,
             autoregressive=autoregressive,
         )
+        
+        # Only create separate code system collections for specific splits
+        if split_name not in splits_with_multiple_systems:
+            continue
+            
+        # Only create if we have code system mappings
+        if code_system2code_indices is None:
+            continue
+            
+        # Create separate metric collections for each code system
+        for code_system_name, code_system_code_indices in code_system2code_indices.items():
+            # Intersect split codes with code system codes (if split filtering exists)
+            if split_code_indices is not None:
+                # Find intersection using numpy for efficiency
+                intersect_indices = np.intersect1d(
+                    code_system_code_indices.numpy(), 
+                    split_code_indices.numpy()
+                )
+                if len(intersect_indices) > 0:
+                    code_indices = torch.tensor(intersect_indices)
+                else:
+                    code_indices = torch.tensor([], dtype=torch.long)
+            else:
+                code_indices = code_system_code_indices.clone()
+            
+            metric_collections[split_name][code_system_name] = get_metric_collection(
+                config=config,
+                number_of_classes=number_of_classes,
+                split_code_indices=code_indices,
+                autoregressive=autoregressive,
+            )
+    
     return metric_collections
 
 
