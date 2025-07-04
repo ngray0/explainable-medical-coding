@@ -59,7 +59,7 @@ def create_split2target_indices_lookup(
             data.with_format("pandas")[TARGET_COLUMN].explode().unique().tolist()
         )
         target_ids = target_tokenizer(unique_codes)
-        split2code_indices[split_name] = torch.tensor(target_ids)
+        split2code_indices[split_name] = torch.tensor(target_ids, dtype=torch.long)
     split2code_indices["train_val"] = split2code_indices["train"]
     return split2code_indices
 
@@ -119,9 +119,9 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
     print(f"🔍 Available dataset columns: {available_columns}")
     
     # Look for diagnosis and procedure columns with flexible naming
-    # Pattern: any column containing "diag" maps to "diagnosis", any containing "proc" maps to "procedure"
-    diagnosis_columns = [col for col in available_columns if "diag" in col.lower()]
-    procedure_columns = [col for col in available_columns if "proc" in col.lower()]
+    # Pattern: any column containing "diag" but not "type" maps to "diagnosis", same for "proc"
+    diagnosis_columns = [col for col in available_columns if "diag" in col.lower() and "type" not in col.lower()]
+    procedure_columns = [col for col in available_columns if "proc" in col.lower() and "type" not in col.lower()]
     
     print(f"🔍 Found diagnosis columns: {diagnosis_columns}")
     print(f"🔍 Found procedure columns: {procedure_columns}")
@@ -140,7 +140,7 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
     
     # Collect all codes by system across all splits
     for split_name, data in dataset.items():
-        df = data.with_format("pandas")
+        df = data.to_pandas()
         
         # Extract diagnosis codes from all diagnosis columns
         for diag_col in diagnosis_columns:
@@ -163,7 +163,7 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
             valid_codes = [code for code in codes if code in target_tokenizer.target2id]
             if valid_codes:
                 target_ids = target_tokenizer(valid_codes)
-                code_system2code_indices[code_system] = torch.tensor(target_ids)
+                code_system2code_indices[code_system] = torch.tensor(target_ids, dtype=torch.long)
                 print(f"Created {code_system} mapping with {len(target_ids)} codes")
     
     return code_system2code_indices
