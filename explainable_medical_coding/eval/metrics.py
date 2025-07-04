@@ -119,9 +119,30 @@ class MetricCollection:
         filtered_batch = {}
         targets, logits = batch["targets"], batch["logits"]
 
-        # Filter to only relevant code indices
-        filtered_targets = torch.index_select(targets, -1, self.code_indices)
-        filtered_logits = torch.index_select(logits, -1, self.code_indices)
+        # Validate indices are within tensor bounds (critical fix for CUDA index error)
+        max_valid_index = targets.shape[-1] - 1
+        valid_mask = self.code_indices <= max_valid_index
+        
+        if not valid_mask.all():
+            # Some indices are out of bounds - filter to only valid ones
+            valid_code_indices = self.code_indices[valid_mask]
+            invalid_count = (~valid_mask).sum().item()
+            print(f"⚠️  {self.code_system_name or 'all'}: Filtered out {invalid_count} invalid indices (>{max_valid_index})")
+            
+            if len(valid_code_indices) == 0:
+                print(f"⚠️  {self.code_system_name or 'all'}: No valid indices found, skipping batch")
+                # Return empty batch with correct structure
+                return {
+                    "targets": targets[:0, :0] if len(targets.shape) > 1 else targets[:0],
+                    "logits": logits[:0, :0] if len(logits.shape) > 1 else logits[:0],
+                    "loss": batch.get("loss")
+                }
+        else:
+            valid_code_indices = self.code_indices
+
+        # Filter to only relevant code indices using valid indices
+        filtered_targets = torch.index_select(targets, -1, valid_code_indices)
+        filtered_logits = torch.index_select(logits, -1, valid_code_indices)
         
         # Find samples that have at least one target in this code system
         idx_targets = torch.sum(filtered_targets, dim=-1) > 0
