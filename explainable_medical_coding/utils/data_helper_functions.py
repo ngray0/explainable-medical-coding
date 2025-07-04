@@ -145,6 +145,9 @@ def create_targets_column(
     example: dict, target_columns: list[str]
 ) -> dict[str, list[str]]:
     """Create the targets column by combining the columns specified in target_columns.
+    
+    This function preserves the original target columns while creating a combined targets column
+    for compatibility with existing code and to enable separate code system evaluation.
 
     Args:
         example (dict): The example.
@@ -157,6 +160,7 @@ def create_targets_column(
     for target_column in target_columns:
         if example[target_column] is not None:
             example[TARGET_COLUMN] += example[target_column]
+    # Note: Original target_columns are preserved for separate code system evaluation
     return example
 
 

@@ -89,6 +89,13 @@ def main(cfg: OmegaConf) -> None:
         LOGGER.info("Loading Tokenizer from model_path")
         target_tokenizer.load(model_path / "target_tokenizer.json")
 
+    # Create lookups BEFORE setting format to preserve original columns for code system mapping
+    lookups = factories.get_lookups(
+        dataset=dataset,
+        text_tokenizer=text_tokenizer,
+        target_tokenizer=target_tokenizer,
+    )
+
     # convert targets to target ids
     dataset = dataset.map(
         lambda x: {"target_ids": target_tokenizer(x[TARGET_COLUMN])},
@@ -96,12 +103,6 @@ def main(cfg: OmegaConf) -> None:
     )
     dataset.set_format(
         type="torch", columns=["input_ids", "length", "attention_mask", "target_ids"]
-    )
-
-    lookups = factories.get_lookups(
-        dataset=dataset,
-        text_tokenizer=text_tokenizer,
-        target_tokenizer=target_tokenizer,
     )
     LOGGER.info(lookups.data_info)
 

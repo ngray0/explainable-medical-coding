@@ -126,8 +126,11 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
         break  # Just need to check once
     
     if not (has_diagnosis or has_procedure):
-        print("No diagnosis_codes or procedure_codes columns found - using traditional evaluation")
+        print("❌ No diagnosis_codes or procedure_codes columns found - using traditional evaluation")
+        print(f"Available columns: {data.column_names}")
         return {}
+    
+    print(f"✅ Found code system columns - diagnosis: {has_diagnosis}, procedure: {has_procedure}")
     
     # Collect all codes by system across all splits
     if has_diagnosis:

@@ -213,7 +213,7 @@ def get_metric_collections(
     metric_collections: dict[str, dict[str, metrics.MetricCollection]] = defaultdict(dict)
     
     # Splits that should have multiple code system evaluations
-    splits_with_multiple_systems = {"train_val", "validation", "test"}
+    splits_with_multiple_systems = {"train", "train_val", "validation", "test"}
     
     for split_name in split_names:
         if split2code_indices is not None:
@@ -235,7 +235,10 @@ def get_metric_collections(
             
         # Only create if we have code system mappings
         if code_system2code_indices is None:
+            print(f"❌ No code_system2code_indices provided for {split_name} - skipping separate evaluations")
             continue
+        
+        print(f"✅ Creating separate metric collections for {split_name}: {list(code_system2code_indices.keys())}")
             
         # Create separate metric collections for each code system
         for code_system_name, code_system_code_indices in code_system2code_indices.items():
