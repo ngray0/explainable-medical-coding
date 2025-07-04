@@ -259,10 +259,17 @@ class Trainer:
         loss: torch.Tensor,
         split_name: str,
     ) -> None:
+        # Convert to dict format for medical-coding-reproducibility style filtering
+        batch = {
+            "logits": y_probs,
+            "targets": targets, 
+            "loss": loss
+        }
+        
         # Update all metric collections for this split in parallel
-        # Each collection will filter the tensors using its own code_indices during update()
+        # Each collection will apply sample-level filtering using filter_batch()
         for target_name in self.metric_collections[split_name].keys():
-            self.metric_collections[split_name][target_name].update(y_probs, targets, loss)
+            self.metric_collections[split_name][target_name].update(batch)
 
     def calculate_metrics(
         self,

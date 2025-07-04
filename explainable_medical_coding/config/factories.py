@@ -174,6 +174,7 @@ def get_metric_collection(
     number_of_classes: int,
     split_code_indices: Optional[torch.Tensor] = None,
     autoregressive: bool = False,
+    code_system_name: Optional[str] = None,
 ) -> metrics.MetricCollection:
     metric_list = []
     for metric in config:
@@ -191,6 +192,7 @@ def get_metric_collection(
         metrics=metric_list,
         code_indices=code_indices,
         autoregressive=autoregressive,
+        code_system_name=code_system_name,
     )
 
 
@@ -227,6 +229,7 @@ def get_metric_collections(
             number_of_classes=number_of_classes,
             split_code_indices=split_code_indices,
             autoregressive=autoregressive,
+            code_system_name="all",
         )
         
         # Only create separate code system collections for specific splits
@@ -261,6 +264,7 @@ def get_metric_collections(
                 number_of_classes=number_of_classes,
                 split_code_indices=code_indices,
                 autoregressive=autoregressive,
+                code_system_name=code_system_name,
             )
     
     return metric_collections

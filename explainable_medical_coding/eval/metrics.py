@@ -75,7 +75,6 @@ class MetricCollection:
     ):
         self.metrics = metrics
         self.code_system_name = code_system_name
-        self.code_system_name = code_system_name
         self.autoregressive = autoregressive
         self.threshold = threshold
         if code_indices is not None:
@@ -107,6 +106,35 @@ class MetricCollection:
         if code_indices is None:
             return tensor
         return torch.index_select(tensor, -1, code_indices)
+
+    def filter_batch(self, batch: dict) -> dict:
+        """Filter batch to only include samples with relevant targets (medical-coding-reproducibility approach).
+        
+        This removes patients who have NO targets in the current code system,
+        which is crucial for proper separate evaluation.
+        """
+        if self.code_indices is None:
+            return batch
+
+        filtered_batch = {}
+        targets, logits = batch["targets"], batch["logits"]
+
+        # Filter to only relevant code indices
+        filtered_targets = torch.index_select(targets, -1, self.code_indices)
+        filtered_logits = torch.index_select(logits, -1, self.code_indices)
+        
+        # Find samples that have at least one target in this code system
+        idx_targets = torch.sum(filtered_targets, dim=-1) > 0
+        
+        # Remove samples with no targets in this code system
+        filtered_batch["targets"] = filtered_targets[idx_targets]
+        filtered_batch["logits"] = filtered_logits[idx_targets]
+        
+        if "loss" in batch:
+            filtered_batch["loss"] = batch["loss"]  # Loss applies to all samples
+            
+        print(f"🔍 {self.code_system_name or 'all'}: Filtered {targets.shape[0]} → {filtered_batch['targets'].shape[0]} samples")
+        return filtered_batch
 
     def is_best(
         self,
@@ -175,12 +203,47 @@ class MetricCollection:
             if metric.metric_type == "loss":
                 metric.update(loss)
 
-    def update(
-        self,
-        y_probs: torch.Tensor,
-        targets: torch.Tensor,
-        loss: Optional[torch.Tensor] = None,
-    ):
+    def update(self, *args, **kwargs):
+        """Update method with dual interface support.
+        
+        Can accept either:
+        1. Dict format: update({"logits": tensor, "targets": tensor, "loss": tensor})
+        2. Legacy format: update(y_probs, targets, loss=None)
+        """
+        if len(args) == 1 and isinstance(args[0], dict):
+            # New dict-based interface (medical-coding-reproducibility style)
+            batch = args[0]
+            self.update_from_dict(batch)
+        elif len(args) >= 2:
+            # Legacy tensor-based interface  
+            y_probs, targets = args[0], args[1]
+            loss = args[2] if len(args) > 2 else kwargs.get('loss')
+            self.update_from_tensors(y_probs, targets, loss)
+        else:
+            raise ValueError("update() requires either dict or (y_probs, targets, loss) arguments")
+
+    def update_from_dict(self, batch: dict):
+        """Update metrics using dict interface with sample-level filtering."""
+        # Apply sample-level filtering (key innovation from medical-coding-reproducibility)
+        filtered_batch = self.filter_batch(batch)
+        
+        # Extract tensors from filtered batch
+        if filtered_batch["targets"].shape[0] == 0:
+            print(f"⚠️  {self.code_system_name or 'all'}: No samples with relevant targets, skipping update")
+            return
+            
+        y_probs = detach(filtered_batch["logits"])
+        targets = detach(filtered_batch["targets"])
+        
+        if "loss" in filtered_batch:
+            loss = detach(filtered_batch["loss"]).cpu()
+            self.update_loss(loss)
+
+        self.update_classification_metrics(y_probs, targets)
+        self.update_ranking_metrics(y_probs, targets)
+
+    def update_from_tensors(self, y_probs: torch.Tensor, targets: torch.Tensor, loss: Optional[torch.Tensor] = None):
+        """Legacy tensor-based update method (backward compatibility)."""
         y_probs, targets = (
             detach(y_probs),
             detach(targets),
