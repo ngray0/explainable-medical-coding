@@ -111,45 +111,50 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
     """Create mappings for diagnosis vs procedure codes based on source columns."""
     code_system2code_indices = {}
     
-    # Create code system to code sets mapping (like medical-coding-reproducibility)
-    code_system2codes = {}
-    
-    # Check if we have separate code columns
-    has_diagnosis = False
-    has_procedure = False
-    
+    # Get available columns from the first split
     for split_name, data in dataset.items():
-        if "diagnosis_codes" in data.column_names:
-            has_diagnosis = True
-        if "procedure_codes" in data.column_names:
-            has_procedure = True
-        break  # Just need to check once
+        available_columns = data.column_names
+        break
     
-    if not (has_diagnosis or has_procedure):
-        print("❌ No diagnosis_codes or procedure_codes columns found - using traditional evaluation")
-        print(f"Available columns: {data.column_names}")
+    print(f"🔍 Available dataset columns: {available_columns}")
+    
+    # Look for diagnosis and procedure columns with flexible naming
+    # Pattern: any column containing "diag" maps to "diagnosis", any containing "proc" maps to "procedure"
+    diagnosis_columns = [col for col in available_columns if "diag" in col.lower()]
+    procedure_columns = [col for col in available_columns if "proc" in col.lower()]
+    
+    print(f"🔍 Found diagnosis columns: {diagnosis_columns}")
+    print(f"🔍 Found procedure columns: {procedure_columns}")
+    
+    if not (diagnosis_columns or procedure_columns):
+        print("❌ No diagnosis/procedure columns found - using traditional evaluation")
+        print("   (Looking for columns containing 'diag' or 'proc')")
         return {}
     
-    print(f"✅ Found code system columns - diagnosis: {has_diagnosis}, procedure: {has_procedure}")
-    
-    # Collect all codes by system across all splits
-    if has_diagnosis:
+    # Create code system to code sets mapping
+    code_system2codes = {}
+    if diagnosis_columns:
         code_system2codes["diagnosis"] = set()
-    if has_procedure:
+    if procedure_columns:
         code_system2codes["procedure"] = set()
     
+    # Collect all codes by system across all splits
     for split_name, data in dataset.items():
         df = data.with_format("pandas")
         
-        # Extract diagnosis codes
-        if has_diagnosis and "diagnosis_codes" in df.columns:
-            diag_codes = df["diagnosis_codes"].explode().dropna().unique().tolist()
-            code_system2codes["diagnosis"].update(diag_codes)
+        # Extract diagnosis codes from all diagnosis columns
+        for diag_col in diagnosis_columns:
+            if diag_col in df.columns:
+                diag_codes = df[diag_col].explode().dropna().unique().tolist()
+                code_system2codes["diagnosis"].update(diag_codes)
+                print(f"✅ Added {len(diag_codes)} unique codes from {diag_col}")
         
-        # Extract procedure codes
-        if has_procedure and "procedure_codes" in df.columns:
-            proc_codes = df["procedure_codes"].explode().dropna().unique().tolist()
-            code_system2codes["procedure"].update(proc_codes)
+        # Extract procedure codes from all procedure columns  
+        for proc_col in procedure_columns:
+            if proc_col in df.columns:
+                proc_codes = df[proc_col].explode().dropna().unique().tolist()
+                code_system2codes["procedure"].update(proc_codes)
+                print(f"✅ Added {len(proc_codes)} unique codes from {proc_col}")
     
     # Convert to target indices for each code system
     for code_system, codes in code_system2codes.items():
