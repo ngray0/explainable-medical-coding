@@ -123,11 +123,17 @@ class MetricCollection:
         max_valid_index = targets.shape[-1] - 1
         valid_mask = self.code_indices <= max_valid_index
         
+        print(f"📊 {self.code_system_name or 'all'}: tensor_shape={targets.shape}, max_valid_idx={max_valid_index}")
+        print(f"📊 {self.code_system_name or 'all'}: code_indices_range=[{self.code_indices.min().item()}, {self.code_indices.max().item()}]")
+        
         if not valid_mask.all():
             # Some indices are out of bounds - filter to only valid ones
             valid_code_indices = self.code_indices[valid_mask]
             invalid_count = (~valid_mask).sum().item()
-            print(f"⚠️  {self.code_system_name or 'all'}: Filtered out {invalid_count} invalid indices (>{max_valid_index})")
+            invalid_indices = self.code_indices[~valid_mask]
+            print(f"⚠️  {self.code_system_name or 'all'}: Filtered out {invalid_count} invalid indices")
+            print(f"    Invalid indices: {invalid_indices[:10].tolist()}{'...' if len(invalid_indices) > 10 else ''}")
+            print(f"    Max tensor index: {max_valid_index}")
             
             if len(valid_code_indices) == 0:
                 print(f"⚠️  {self.code_system_name or 'all'}: No valid indices found, skipping batch")

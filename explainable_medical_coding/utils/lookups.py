@@ -159,11 +159,32 @@ def create_code_system_mappings(dataset: DatasetDict, target_tokenizer: TargetTo
     # Convert to target indices for each code system
     for code_system, codes in code_system2codes.items():
         if codes:
-            # Get indices for codes that exist in the target tokenizer
-            valid_codes = [code for code in codes if code in target_tokenizer.target2id]
+            # Format codes with proper punctuation before tokenizer lookup
+            from explainable_medical_coding.utils.data_helper_functions import reformat_icd9cm_code, reformat_icd9pcs_code, reformat_icd10cm_code
+            
+            formatted_codes = []
+            for code in codes:
+                if code_system == "diagnosis":
+                    # Assume ICD-10 for diagnosis codes (adjust based on your dataset)
+                    formatted_code = reformat_icd10cm_code(code)
+                elif code_system == "procedure":
+                    # Assume ICD-9 PCS for procedure codes (adjust based on your dataset)  
+                    formatted_code = reformat_icd9pcs_code(code)
+                else:
+                    formatted_code = code
+                formatted_codes.append(formatted_code)
+            
+            # Get indices for formatted codes that exist in the target tokenizer
+            valid_codes = [code for code in formatted_codes if code in target_tokenizer.target2id]
+            invalid_codes = [code for code in formatted_codes if code not in target_tokenizer.target2id]
+            
+            print(f"📋 {code_system}: {len(codes)} raw codes → {len(formatted_codes)} formatted → {len(valid_codes)} valid")
+            if invalid_codes:
+                print(f"   ❌ First 5 invalid codes: {invalid_codes[:5]}")
+            
             if valid_codes:
                 target_ids = target_tokenizer(valid_codes)
                 code_system2code_indices[code_system] = torch.tensor(target_ids, dtype=torch.long)
-                print(f"Created {code_system} mapping with {len(target_ids)} codes")
+                print(f"✅ Created {code_system} mapping with {len(target_ids)} codes")
     
     return code_system2code_indices
