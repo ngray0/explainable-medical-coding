@@ -32,9 +32,9 @@ def get_lookups(
     )
 
 
-def get_model(config: OmegaConf, data_info: dict) -> torch.nn.Module:
+def get_model(config: OmegaConf, data_info: dict, target_tokenizer: TargetTokenizer = None) -> torch.nn.Module:
     model_class = getattr(models, config.name)
-    return model_class(**data_info, **config.configs)
+    return model_class(**data_info, **config.configs, target_tokenizer=target_tokenizer)
 
 
 def get_optimizer(config: OmegaConf, model: torch.nn.Module) -> torch.optim.Optimizer:

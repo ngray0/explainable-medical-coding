@@ -77,7 +77,7 @@ class LabelCrossAttention(nn.Module):
         self.scale = scale
         
         # Initialize weights
-        if init_with_descriptions and model_path and target_tokenizer:
+        if init_with_descriptions and model_path and target_tokenizer is not None:
             self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
         else:
             self._init_weights(mean=0.0, std=0.03)

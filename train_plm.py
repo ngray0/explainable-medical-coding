@@ -106,7 +106,7 @@ def main(cfg: OmegaConf) -> None:
     LOGGER.info(lookups.data_info)
 
     if model_path is None:
-        model = factories.get_model(config=cfg.model, data_info=lookups.data_info)
+        model = factories.get_model(config=cfg.model, data_info=lookups.data_info, target_tokenizer=target_tokenizer)
     else:
         LOGGER.info("Loading Model from model_path")
         saved_config = OmegaConf.load(model_path / "config.yaml")

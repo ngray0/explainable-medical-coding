@@ -42,6 +42,7 @@ class PLMICD(nn.Module):
         cross_attention: bool = True,
         scale: float = 1.0,
         mask_input: bool = False,
+        target_tokenizer = None,
         **kwargs,
     ):
         super().__init__()
@@ -61,7 +62,13 @@ class PLMICD(nn.Module):
 
         if cross_attention:
             self.label_wise_attention = LabelCrossAttention(
-                input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
+                input_size=self.config.hidden_size, 
+                num_classes=num_classes, 
+                scale=scale,
+                init_with_descriptions=target_tokenizer is not None,
+                model_path=model_path,
+                target_tokenizer=target_tokenizer,
+                icd_version=kwargs.get('icd_version', 10)
             )
         else:
             self.label_wise_attention = LabelAttention(
