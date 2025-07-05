@@ -55,7 +55,16 @@ class LabelAttention(nn.Module):
 
 
 class LabelCrossAttention(nn.Module):
-    def __init__(self, input_size: int, num_classes: int, scale: float = 1.0):
+    def __init__(
+        self, 
+        input_size: int, 
+        num_classes: int, 
+        scale: float = 1.0,
+        init_with_descriptions: bool = False,
+        model_path: str = None,
+        target_tokenizer = None,
+        icd_version: int = 10
+    ):
         super().__init__()
         self.weights_k = nn.Linear(input_size, input_size, bias=False)
         self.label_representations = torch.nn.Parameter(
@@ -66,7 +75,12 @@ class LabelCrossAttention(nn.Module):
         self.layernorm = nn.LayerNorm(input_size)
         self.num_classes = num_classes
         self.scale = scale
-        self._init_weights(mean=0.0, std=0.03)
+        
+        # Initialize weights
+        if init_with_descriptions and model_path and target_tokenizer:
+            self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
+        else:
+            self._init_weights(mean=0.0, std=0.03)
 
     def forward(
         self,
@@ -147,6 +161,71 @@ class LabelCrossAttention(nn.Module):
         self.output_linear.weight = torch.nn.init.normal_(
             self.output_linear.weight, mean, std
         )
+
+    def _init_weights_description_embeddings(
+        self, 
+        model_path: str, 
+        target_tokenizer,
+        icd_version: int = 10,
+        batch_size: int = 64
+    ) -> None:
+        """Initialize label representations with ICD code description embeddings.
+
+        Args:
+            model_path (str): Path to the transformer model for generating embeddings
+            target_tokenizer: TargetTokenizer that maps indices to ICD codes
+            icd_version (int): ICD version (9 or 10). Defaults to 10.
+            batch_size (int): Batch size for processing descriptions. Defaults to 64.
+        """
+        from transformers import AutoModel, AutoTokenizer
+        from rich.progress import track
+        from explainable_medical_coding.utils.data_helper_functions import get_code2description_mimiciv_combined
+        
+        # Load ICD descriptions
+        code2desc = get_code2description_mimiciv_combined(icd_version)
+        
+        # Load embedding model
+        embed_model = AutoModel.from_pretrained(model_path)
+        embed_tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Collect all descriptions in target_tokenizer order
+        descriptions = []
+        for i in range(len(target_tokenizer)):
+            icd_code = target_tokenizer.id2target[i]
+            descriptions.append(code2desc[icd_code])
+        
+        # Process descriptions in batches with progress bar
+        all_embeddings = []
+        batch_ranges = range(0, len(descriptions), batch_size)
+        
+        for i in track(batch_ranges, description="Generating description embeddings..."):
+            batch_descriptions = descriptions[i:i+batch_size]
+            
+            # Batch tokenization
+            tokens = embed_tokenizer(
+                batch_descriptions,
+                return_tensors="pt", 
+                truncation=True, 
+                max_length=128,
+                padding=True
+            )
+            
+            # Batch forward pass
+            with torch.no_grad():
+                outputs = embed_model(**tokens)
+                # Mean pooling with attention mask to handle padding
+                attention_mask = tokens['attention_mask'].unsqueeze(-1)
+                masked_embeddings = outputs.last_hidden_state * attention_mask
+                embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+                all_embeddings.append(embeddings)
+        
+        # Combine all embeddings and replace parameter data
+        final_embeddings = torch.cat(all_embeddings, dim=0)
+        self.label_representations.data.copy_(final_embeddings)
+        
+        # Clean up the temporary model to free memory
+        del embed_model
+        del embed_tokenizer
 
 
 class InputMasker(nn.Module):

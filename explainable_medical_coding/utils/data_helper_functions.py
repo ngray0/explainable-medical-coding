@@ -260,6 +260,64 @@ def get_code2description_mimiciii() -> dict[str, str]:
     return {row["target"]: row["long_title"] for row in code_to_description_dict}
 
 
+def get_code2description_mimiciv_combined(icd_version: int = 10) -> dict[str, str]:
+    """Get a dictionary mapping ICD codes to descriptions for both diagnosis and procedure codes.
+
+    Args:
+        icd_version (int): ICD version (9 or 10)
+
+    Returns:
+        dict[str, str]: Dictionary mapping ICD codes to descriptions
+    """
+
+    if icd_version not in [9, 10]:
+        raise ValueError("icd_version must be either 9 or 10")
+
+    # Read diagnosis codes
+    df_descriptions_diag = pl.read_csv(
+        "data/raw/physionet.org/files/mimiciv/2.2/hosp/d_icd_diagnoses.csv.gz",
+        dtypes={"icd_code": str, "icd_version": int, "long_title": str},
+    )
+
+    # Read procedure codes
+    df_descriptions_proc = pl.read_csv(
+        "data/raw/physionet.org/files/mimiciv/2.2/hosp/d_icd_procedures.csv.gz",
+        dtypes={"icd_code": str, "icd_version": int, "long_title": str},
+    )
+
+    # Filter by ICD version
+    df_descriptions_diag = df_descriptions_diag.filter(pl.col("icd_version") == icd_version)
+    df_descriptions_proc = df_descriptions_proc.filter(pl.col("icd_version") == icd_version)
+
+    # Rename columns
+    df_descriptions_diag = df_descriptions_diag.rename({"icd_code": "target"})
+    df_descriptions_proc = df_descriptions_proc.rename({"icd_code": "target"})
+
+    # Apply formatting (only for diagnosis codes)
+    if icd_version == 10:
+        df_descriptions_diag = df_descriptions_diag.with_columns(
+            pl.col("target").apply(reformat_icd10cm_code).alias("target")
+        )
+    else:
+        df_descriptions_diag = df_descriptions_diag.with_columns(
+            pl.col("target").apply(reformat_icd9cm_code).alias("target")
+        )
+        df_descriptions_proc = df_descriptions_proc.with_columns(
+            pl.col("target").apply(reformat_icd9pcs_code).alias("target")
+        )
+
+    # Combine both dataframes
+    df_descriptions = pl.concat([df_descriptions_diag, df_descriptions_proc])
+
+    # Create a dictionary from the 'target' and 'long_title' columns
+    code_to_description_dict = df_descriptions.select(
+        ["target", "long_title"]
+    ).to_dicts()
+
+    # Return a dictionary mapping 'target' to 'long_title'
+    return {row["target"]: row["long_title"] for row in code_to_description_dict}
+
+
 def clean_empty_codes(example):
     if example["procedure_codes"] is None:
         example["procedure_codes"] = []
