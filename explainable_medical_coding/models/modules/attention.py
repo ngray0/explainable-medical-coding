@@ -63,7 +63,8 @@ class LabelCrossAttention(nn.Module):
         init_with_descriptions: bool = False,
         model_path: str = None,
         target_tokenizer = None,
-        icd_version: int = 10
+        icd_version: int = 10,
+        freeze_label_embeddings: bool = False
     ):
         super().__init__()
         self.weights_k = nn.Linear(input_size, input_size, bias=False)
@@ -81,6 +82,10 @@ class LabelCrossAttention(nn.Module):
             self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
         else:
             self._init_weights(mean=0.0, std=0.03)
+        
+        # Freeze label embeddings if requested
+        if freeze_label_embeddings:
+            self.freeze_label_embeddings()
 
     def forward(
         self,
@@ -226,6 +231,14 @@ class LabelCrossAttention(nn.Module):
         # Clean up the temporary model to free memory
         del embed_model
         del embed_tokenizer
+
+    def freeze_label_embeddings(self) -> None:
+        """Freeze the label representation parameters."""
+        self.label_representations.requires_grad = False
+        
+    def unfreeze_label_embeddings(self) -> None:
+        """Unfreeze the label representation parameters."""
+        self.label_representations.requires_grad = True
 
 
 class InputMasker(nn.Module):

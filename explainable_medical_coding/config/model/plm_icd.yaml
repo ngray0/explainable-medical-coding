@@ -8,3 +8,4 @@ configs:
   lambda_1: 0.0
   scale: 1
   mask_input: false
+  freeze_label_embeddings: false

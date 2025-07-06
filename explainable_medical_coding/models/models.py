@@ -68,7 +68,8 @@ class PLMICD(nn.Module):
                 init_with_descriptions=target_tokenizer is not None,
                 model_path=model_path,
                 target_tokenizer=target_tokenizer,
-                icd_version=kwargs.get('icd_version', 10)
+                icd_version=kwargs.get('icd_version', 10),
+                freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
             )
         else:
             self.label_wise_attention = LabelAttention(
