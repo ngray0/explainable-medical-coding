@@ -140,6 +140,12 @@ class Trainer:
             # Scale and compute gradients
             scaled_loss = self.gradient_scaler.scale(loss)
             scaled_loss.backward()
+            
+            # Debug: Check if label_representations has gradients (should be None if frozen)
+            if hasattr(self.model, 'label_wise_attention') and hasattr(self.model.label_wise_attention, 'label_representations'):
+                if batch_idx == 0:  # Only print for first batch to avoid spam
+                    label_param = self.model.label_wise_attention.label_representations
+                    print(f"After backward() - requires_grad: {label_param.requires_grad}, grad is None: {label_param.grad is None}")
 
             if ((batch_idx + 1) % self.accumulate_grad_batches == 0) or (
                 batch_idx + 1 == num_batches
