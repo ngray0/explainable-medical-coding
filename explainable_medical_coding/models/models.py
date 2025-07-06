@@ -65,10 +65,10 @@ class PLMICD(nn.Module):
                 input_size=self.config.hidden_size, 
                 num_classes=num_classes, 
                 scale=scale,
-                init_with_descriptions=target_tokenizer is not None,
                 model_path=model_path,
                 target_tokenizer=target_tokenizer,
                 icd_version=kwargs.get('icd_version', 10),
+                init_with_descriptions=kwargs.get('init_with_descriptions', True),
                 freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
             )
         else:
