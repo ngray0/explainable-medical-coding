@@ -118,6 +118,9 @@ def main(cfg: OmegaConf) -> None:
         )
 
     model.to(device)
+    # Debug: Check requires_grad after moving to device
+    if hasattr(model, 'label_wise_attention') and hasattr(model.label_wise_attention, 'label_representations'):
+        print(f"After model.to(device) - label_representations.requires_grad: {model.label_wise_attention.label_representations.requires_grad}")
     # model = torch.compile(model)
 
     if cfg.distillation:

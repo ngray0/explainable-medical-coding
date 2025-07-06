@@ -85,6 +85,9 @@ class Trainer:
 
     def train_one_epoch(self, epoch: int) -> None:
         self.model.train()
+        # Debug: Check requires_grad at start of training
+        if hasattr(self.model, 'label_wise_attention') and hasattr(self.model.label_wise_attention, 'label_representations'):
+            print(f"Start of epoch {epoch} - label_representations.requires_grad: {self.model.label_wise_attention.label_representations.requires_grad}")
         self.on_train_begin()
 
         # ── DEBUG: choose a parameter you expect to update every step
