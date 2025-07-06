@@ -86,6 +86,9 @@ class LabelCrossAttention(nn.Module):
         # Freeze label embeddings if requested
         if freeze_label_embeddings:
             self.freeze_label_embeddings()
+        
+        # Print requires_grad status for debugging
+        print(f"LabelCrossAttention - label_representations.requires_grad: {self.label_representations.requires_grad}")
 
     def forward(
         self,
