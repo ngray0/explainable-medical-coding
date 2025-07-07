@@ -194,6 +194,7 @@ class LabelCrossAttention(nn.Module):
         
         # Load embedding model
         embed_model = AutoModel.from_pretrained(model_path)
+        embed_model = embed_model.cuda()
         embed_tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Collect all descriptions in target_tokenizer order
@@ -216,7 +217,7 @@ class LabelCrossAttention(nn.Module):
                 truncation=True, 
                 max_length=128,
                 padding=True
-            )
+            ).to('cuda')
             
             # Batch forward pass
             with torch.no_grad():
