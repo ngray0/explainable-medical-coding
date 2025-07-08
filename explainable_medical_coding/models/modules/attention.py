@@ -2,6 +2,9 @@ from typing import Optional, Callable
 
 import torch
 import torch.nn as nn
+from transformers import AutoModel, AutoTokenizer
+from rich.progress import track
+from explainable_medical_coding.utils.data_helper_functions import get_code2description_mimiciv_combined
 
 
 class LabelAttention(nn.Module):
@@ -175,7 +178,9 @@ class LabelCrossAttention(nn.Module):
         model_path: str, 
         target_tokenizer,
         icd_version: int = 10,
-        batch_size: int = 64
+        batch_size: int = 64,
+        mean: float = 0.0, 
+        std: float = 0.03
     ) -> None:
         """Initialize label representations with ICD code description embeddings.
 
@@ -185,10 +190,13 @@ class LabelCrossAttention(nn.Module):
             icd_version (int): ICD version (9 or 10). Defaults to 10.
             batch_size (int): Batch size for processing descriptions. Defaults to 64.
         """
-        from transformers import AutoModel, AutoTokenizer
-        from rich.progress import track
-        from explainable_medical_coding.utils.data_helper_functions import get_code2description_mimiciv_combined
+        self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
+        self.weights_v.weight = torch.nn.init.normal_(self.weights_v.weight, mean, std)
         
+        self.output_linear.weight = torch.nn.init.normal_(
+            self.output_linear.weight, mean, std
+        )
+
         # Load ICD descriptions
         code2desc = get_code2description_mimiciv_combined(icd_version)
         
@@ -244,6 +252,148 @@ class LabelCrossAttention(nn.Module):
         """Unfreeze the label representation parameters."""
         self.label_representations.requires_grad = True
 
+class TokenLevelDescriptionCrossAttention(nn.Module):
+    """
+    Performs cross-attention where each code description (Query) attends to the
+    tokens of the clinical note (Key, Value).
+
+    """
+    def __init__(
+        self, 
+        input_size: int, 
+        num_classes: int, 
+        model_path: str,
+        target_tokenizer,
+        scale: float = 1.0,
+        icd_version: int = 10,
+        max_desc_len: int = 128
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.num_classes = num_classes
+        self.scale = scale / (input_size ** 0.5)
+
+        self.q_proj = nn.Linear(input_size, input_size, bias=False)
+        self.k_proj = nn.Linear(input_size, input_size, bias=False)
+        self.v_proj = nn.Linear(input_size, input_size, bias=False)
+        self.output_linear = nn.Linear(input_size, 1)
+        self.layernorm = nn.LayerNorm(input_size)
+
+        self.description_embeddings = nn.Parameter(
+            torch.randn(num_classes, max_desc_len, input_size), 
+            requires_grad=True
+        )
+        
+        # Load and store the embedding model and tokenizer
+        print("Loading description embedding model...")
+        self.embed_model = AutoModel.from_pretrained(model_path)
+        self.embed_tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+        # Tokenize and store all code descriptions
+        self._init_weights(target_tokenizer, icd_version, max_desc_len)
+
+    def _init_weights(
+        self, 
+        target_tokenizer, 
+        icd_version, 
+        max_desc_len, 
+        mean: float = 0.0, 
+        std: float = 0.03
+    ) -> None:
+        
+        self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
+        self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
+        self.q_proj.weight = torch.nn.init.normal_(self.q_proj.weight, mean, std)
+        self.output_linear.weight = torch.nn.init.normal_(
+            self.output_linear.weight, mean, std
+        )
+
+        code2desc = get_code2description_mimiciv_combined(icd_version)
+        descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
+        
+        tokens = self.embed_tokenizer(
+            descriptions, 
+            return_tensors="pt", 
+            padding="max_length", 
+            truncation=True, 
+            max_length=max_desc_len
+        )
+        
+        print("Pre-computing description embeddings...")
+        self.embed_model = self.embed_model.cuda()  
+        
+        with torch.no_grad():
+            outputs = self.embed_model(
+                input_ids=tokens.input_ids.cuda(),
+                attention_mask=tokens.attention_mask.cuda()
+            )
+            self.description_embeddings.data.copy_(outputs.last_hidden_state)
+        
+        self.register_buffer("description_attention_mask", tokens.attention_mask)
+
+        del self.embed_model
+        del self.embed_tokenizer
+        
+        print(f"Stored pre-computed embeddings of shape: {self.description_embeddings.shape}")
+
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attention_masks: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass where descriptions are the Query.
+
+        Args:
+            x (torch.Tensor): Clinical note embeddings. 
+                              Shape: [batch_size, note_seq_len, input_size]
+            attention_masks (torch.Tensor): Mask for the clinical note. 
+                                            Shape: [batch_size, note_seq_len]
+        Returns:
+            torch.Tensor: Logits for each class. Shape: [batch_size, num_classes]
+        """
+        batch_size, note_seq_len, _ = x.shape
+        
+        q_desc = self.q_proj(self.description_embeddings)       # -> [num_classes, desc_seq, dim]
+        k_note = self.k_proj(x)                 # -> [batch, note_seq, dim]
+        v_note = self.v_proj(x)                 # -> [batch, note_seq, dim]
+
+        # 'c,d,b,n' = class, desc_seq, batch, note_seq
+        att_weights = torch.einsum('cdi,bni->cdbn', q_desc, k_note) * self.scale
+        # -> att_weights shape: [num_classes, desc_seq, batch_size, note_seq]
+
+        # Handle attention masks
+        desc_mask = self.description_attention_mask.view(self.num_classes, -1, 1, 1)
+        
+        if attention_masks is not None:
+            note_mask = attention_masks.view(1, 1, batch_size, note_seq_len)
+            combined_mask = (desc_mask * note_mask).bool()
+        else:
+            # If no note mask provided, only use description mask
+            combined_mask = desc_mask.bool()
+            combined_mask = combined_mask.expand(-1, -1, batch_size, note_seq_len)
+        
+        att_weights = att_weights.permute(2, 0, 1, 3)
+        combined_mask = combined_mask.permute(2, 0, 1, 3)
+        att_weights.masked_fill_(~combined_mask, -1e9)
+
+        attention = torch.softmax(att_weights, dim=-1)
+        
+        # 'b,c,d,n' @ 'b,n,i' -> 'b,c,d,i'
+        context = torch.einsum('bcdn,bni->bcdi', attention, v_note)
+        # -> context shape: [batch, num_classes, desc_seq_len, input_size]
+        
+        desc_mask_for_pooling = self.description_attention_mask.view(1, self.num_classes, -1, 1)
+        context.masked_fill_(~desc_mask_for_pooling.bool(), 0)
+
+        pooled_context = context.sum(dim=2) / self.description_attention_mask.sum(dim=1).view(1, self.num_classes, 1)
+        # -> pooled_context shape: [batch, num_classes, input_size]
+
+        y = self.layernorm(pooled_context)
+        output = self.output_linear(y).squeeze(-1) # -> [batch, num_classes]
+        
+        return output
 
 class InputMasker(nn.Module):
     def __init__(self, input_size: int, scale: float = 1.0):
