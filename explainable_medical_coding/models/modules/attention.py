@@ -266,7 +266,7 @@ class TokenLevelDescriptionCrossAttention(nn.Module):
         target_tokenizer,
         scale: float = 1.0,
         icd_version: int = 10,
-        max_desc_len: int = 128
+        max_desc_len: int = 64
     ):
         super().__init__()
         self.input_size = input_size
@@ -279,10 +279,8 @@ class TokenLevelDescriptionCrossAttention(nn.Module):
         self.output_linear = nn.Linear(input_size, 1)
         self.layernorm = nn.LayerNorm(input_size)
 
-        self.description_embeddings = nn.Parameter(
-            torch.randn(num_classes, max_desc_len, input_size), 
-            requires_grad=True
-        )
+        embeddings_placeholder = torch.randn(num_classes, max_desc_len, input_size)
+        self.register_buffer("description_embeddings", embeddings_placeholder)
         
         # Load and store the embedding model and tokenizer
         print("Loading description embedding model...")
@@ -327,7 +325,7 @@ class TokenLevelDescriptionCrossAttention(nn.Module):
                 input_ids=tokens.input_ids.cuda(),
                 attention_mask=tokens.attention_mask.cuda()
             )
-            self.description_embeddings.data.copy_(outputs.last_hidden_state)
+            self.description_embeddings = outputs.last_hidden_state
         
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
