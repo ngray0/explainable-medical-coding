@@ -71,6 +71,7 @@ class PLMICD(nn.Module):
                 encoder_tokenizer=encoder_tokenizer,
                 target_tokenizer=target_tokenizer,
                 icd_version=kwargs.get('icd_version', 10),
+                desc_batch_size=kwargs.get('desc_batch_size', 64),
                 # model_path=model_path,
                 # init_with_descriptions=kwargs.get('init_with_descriptions', True),
                 # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)

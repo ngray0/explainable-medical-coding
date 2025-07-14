@@ -67,6 +67,7 @@ class LabelCrossAttention(nn.Module):
         encoder_tokenizer = None,
         target_tokenizer = None,
         icd_version: int = 10,
+        desc_batch_size: int = 64,
         # init_with_descriptions: bool = False,
         # model_path: str = None,
         # freeze_label_embeddings: bool = False
@@ -85,6 +86,7 @@ class LabelCrossAttention(nn.Module):
         # Store encoder model and tokenizer
         self.encoder_model = encoder_model
         self.encoder_tokenizer = encoder_tokenizer
+        self.desc_batch_size = desc_batch_size
         
         # Initialize tokenized descriptions as buffers
         if target_tokenizer is not None:
@@ -108,6 +110,32 @@ class LabelCrossAttention(nn.Module):
         
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
+    
+    def _encode_descriptions_batched(self) -> torch.Tensor:
+        """Encode descriptions in batches to reduce memory usage."""
+        all_embeddings = []
+        num_descriptions = self.description_input_ids.size(0)
+        
+        with torch.set_grad_enabled(self.training):
+            for i in range(0, num_descriptions, self.desc_batch_size):
+                end_idx = min(i + self.desc_batch_size, num_descriptions)
+                
+                batch_input_ids = self.description_input_ids[i:end_idx]
+                batch_attention_mask = self.description_attention_mask[i:end_idx]
+                
+                desc_outputs = self.encoder_model(
+                    input_ids=batch_input_ids,
+                    attention_mask=batch_attention_mask
+                )
+                
+                # Mean pooling with attention mask
+                attention_mask = batch_attention_mask.unsqueeze(-1)
+                masked_embeddings = desc_outputs.last_hidden_state * attention_mask
+                batch_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+                
+                all_embeddings.append(batch_embeddings)
+        
+        return torch.cat(all_embeddings, dim=0)
         
         # # Initialize weights
         # if init_with_descriptions and model_path and target_tokenizer is not None:
@@ -141,16 +169,8 @@ class LabelCrossAttention(nn.Module):
         V = self.weights_v(x)
         K = self.weights_k(x)
         
-        # Encode descriptions dynamically
-        with torch.set_grad_enabled(self.training):
-            desc_outputs = self.encoder_model(
-                input_ids=self.description_input_ids,
-                attention_mask=self.description_attention_mask
-            )
-            # Mean pooling with attention mask
-            attention_mask = self.description_attention_mask.unsqueeze(-1)
-            masked_embeddings = desc_outputs.last_hidden_state * attention_mask
-            Q = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+        # Encode descriptions dynamically in batches
+        Q = self._encode_descriptions_batched()
         
         # Q = self.label_representations
 
@@ -307,6 +327,7 @@ class TokenLevelDescriptionCrossAttention(nn.Module):
         target_tokenizer,
         scale: float = 1.0,
         icd_version: int = 10,
+        desc_batch_size: int = 64,
         max_desc_len: int = 64
     ):
         super().__init__()
