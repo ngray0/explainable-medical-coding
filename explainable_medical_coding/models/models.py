@@ -61,15 +61,19 @@ class PLMICD(nn.Module):
         )
 
         if cross_attention:
+            from transformers import AutoTokenizer
+            encoder_tokenizer = AutoTokenizer.from_pretrained(model_path)
             self.label_wise_attention = LabelCrossAttention(
                 input_size=self.config.hidden_size, 
                 num_classes=num_classes, 
                 scale=scale,
-                model_path=model_path,
+                encoder_model=self.roberta_encoder,
+                encoder_tokenizer=encoder_tokenizer,
                 target_tokenizer=target_tokenizer,
                 icd_version=kwargs.get('icd_version', 10),
-                init_with_descriptions=kwargs.get('init_with_descriptions', True),
-                freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
+                # model_path=model_path,
+                # init_with_descriptions=kwargs.get('init_with_descriptions', True),
+                # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
             )
         else:
             self.label_wise_attention = LabelAttention(
