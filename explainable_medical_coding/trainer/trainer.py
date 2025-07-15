@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from rich.pretty import pprint
 from rich.progress import track
 from torch.utils.data import DataLoader
+import deepspeed
 
 from explainable_medical_coding.eval.metrics import MetricCollection
 from explainable_medical_coding.trainer.callbacks import BaseCallback
@@ -33,14 +34,23 @@ class Trainer:
         accumulate_grad_batches: int = 1,
     ) -> None:
         self.config = config
-        self.model = model
+        #self.model = model
         self.loss_function = loss_function
-        self.optimizer = optimizer
+        #self.optimizer = optimizer
         self.dataloaders = dataloaders
         self.callbacks = callbacks
         self.device = "cpu"
         self.metric_collections = metric_collections
-        self.lr_scheduler = lr_scheduler
+        # ---- DeepSpeed initialisation ----------------------------------
+        self.engine, self.optimizer, _, self.lr_scheduler = deepspeed.initialize(
+            model=model,
+            model_parameters=model.parameters(),
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            config=config.trainer.deepspeed_config,   # path to the JSON file
+        )
+        self.model = self.engine.module
+        #self.lr_scheduler = lr_scheduler
         self.lookups = lookups
         self.accumulate_grad_batches = accumulate_grad_batches
         pprint(f"Accumulating gradients over {self.accumulate_grad_batches} batch(es).")
@@ -127,19 +137,28 @@ class Trainer:
         for batch_idx, batch in enumerate(
             track(self.dataloaders["train"], description=f"Epoch: {epoch} | Training")
         ):
-            with torch.autocast(device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16):
-                batch = batch.to(self.device)
-                y_probs, targets, loss = self.loss_function(
-                    batch,
-                    model=self.model,
-                    scale=self.gradient_scaler.get_scale(),
-                    epoch=epoch,
-                )
-                loss = loss / self.accumulate_grad_batches
+            # with torch.autocast(device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16):
+            #     batch = batch.to(self.device)
+            #     y_probs, targets, loss = self.loss_function(
+            #         batch,
+            #         model=self.model,
+            #         scale=self.gradient_scaler.get_scale(),
+            #         epoch=epoch,
+            #     )
+            #     loss = loss / self.accumulate_grad_batches
 
-            # Scale and compute gradients
-            scaled_loss = self.gradient_scaler.scale(loss)
-            scaled_loss.backward()
+            # # Scale and compute gradients
+            # scaled_loss = self.gradient_scaler.scale(loss)
+            # scaled_loss.backward()
+
+            batch = batch.to(self.device)
+
+            y_probs, targets, loss = self.loss_function(
+                batch, model=self.model, epoch=epoch
+            )
+            loss = loss / self.accumulate_grad_batches
+
+            self.engine.backward(loss)
             
             # Debug: Check if label_representations has gradients (should be None if frozen)
             if hasattr(self.model, 'label_wise_attention') and hasattr(self.model.label_wise_attention, 'label_representations'):
@@ -154,33 +173,35 @@ class Trainer:
                 before = param_ref[0, :5].detach().cpu().clone()
                 
                 # Unscale gradients first to get true gradient norm
-                if self.use_amp:
-                    self.gradient_scaler.unscale_(self.optimizer)
+                # if self.use_amp:
+                #     self.gradient_scaler.unscale_(self.optimizer)
                 
-                # Calculate gradient norm
-                if param_ref.grad is not None:
-                    grad_norm = param_ref.grad.data.norm().item()
-                else:
-                    grad_norm = 0.0
+                # # Calculate gradient norm
+                # if param_ref.grad is not None:
+                #     grad_norm = param_ref.grad.data.norm().item()
+                # else:
+                #     grad_norm = 0.0
 
-                # Additional gradient clipping if configured
-                if self.config.trainer.clip_grad_norm:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), self.config.trainer.clip_grad_norm
-                    )
+                # # Additional gradient clipping if configured
+                # if self.config.trainer.clip_grad_norm:
+                #     torch.nn.utils.clip_grad_norm_(
+                #         self.model.parameters(), self.config.trainer.clip_grad_norm
+                #     )
 
-                self.gradient_scaler.step(self.optimizer)
-                self.gradient_scaler.update()
-                if self.lr_scheduler is not None and not isinstance(
-                    self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                ):
-                    self.lr_scheduler.step()
-                self.optimizer.zero_grad()
+                # self.gradient_scaler.step(self.optimizer)
+                # self.gradient_scaler.update()
+                # if self.lr_scheduler is not None and not isinstance(
+                #     self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                # ):
+                #     self.lr_scheduler.step()
+                # self.optimizer.zero_grad()
 
                 # Snapshot AFTER optimiser step and show progress for first 50 batches
                 after = param_ref[0, :5].detach().cpu().clone()
                 delta = (after - before).abs().max().item()
-
+                grad_norm = self.engine.get_grad_norm()  # for your debug prints
+                self.engine.step()
+                
                 if batch_idx < 50:
                     print(
                         f"[Epoch {epoch} | Batch {batch_idx}] "

@@ -6,3 +6,5 @@ use_amp: true #Use mixed precision
 threshold_tuning: false #Picks the optimal threshold based on the validation set
 clip_grad_norm: 1 #Clip gradient norm to this value
 clip_value: 10 #Clip the value of the gradients to this value
+
+deepspeed_config: explainable_medical_coding/config/ds_cpu_offload.json #Path to the deepspeed config file
