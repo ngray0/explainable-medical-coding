@@ -11,6 +11,8 @@ from rich.pretty import pprint
 from rich.progress import track
 from torch.utils.data import DataLoader
 import deepspeed
+import torch.distributed as dist
+import os, argparse
 
 from explainable_medical_coding.eval.metrics import MetricCollection
 from explainable_medical_coding.trainer.callbacks import BaseCallback
@@ -42,12 +44,46 @@ class Trainer:
         self.device = "cpu"
         self.metric_collections = metric_collections
         # ---- DeepSpeed initialisation ----------------------------------
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="nccl" if torch.cuda.is_available() else "gloo",
+                rank=0,
+                world_size=1,
+                init_method="tcp://127.0.0.1:29500",
+            )
+        ds_config = {
+            "train_batch_size": 16,                  # GLOBAL batch = micro × acc × gpus
+            "gradient_accumulation_steps": 16,
+            "bf16": {"enabled": True},
+            "gradient_clipping": 1.0,
+            "optimizer": {
+                "type": "AdamW",
+                "params": {
+                    "lr": 3e-5,
+                    "betas": [0.9, 0.999],
+                    "eps": 1e-8,
+                    "weight_decay": 0.001
+                }
+            },
+            "zero_optimization": {
+                "stage": 2,
+                "offload_param":   {"device": "cpu", "pin_memory": True},
+                "offload_optimizer": {"device": "cpu", "pin_memory": True},
+            },
+        }
+        if "LOCAL_RANK" not in os.environ:          # plain python launch
+            os.environ["LOCAL_RANK"] = "0"
+
+        ds_args = argparse.Namespace(local_rank=0)  # dummy Namespace
+
         self.engine, self.optimizer, _, self.lr_scheduler = deepspeed.initialize(
+            ds_args,
             model=model,
             model_parameters=model.parameters(),
-            optimizer=optimizer,
+            optimizer=None,
             lr_scheduler=lr_scheduler,
-            config=config.trainer.deepspeed_config,   # path to the JSON file
+            config=ds_config,   # path to the JSON file
+            dist_init_required=False,
         )
         self.model = self.engine.module
         #self.lr_scheduler = lr_scheduler

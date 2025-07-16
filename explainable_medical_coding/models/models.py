@@ -53,8 +53,9 @@ class PLMICD(nn.Module):
         self.gradient = None
 
         self.config = AutoConfig.from_pretrained(
-            model_path, num_labels=num_classes, finetuning_task=None
+            model_path, num_labels=num_classes, finetuning_task=None, gradient_checkpointing=True
         )
+        self.config.use_cache = False
 
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True

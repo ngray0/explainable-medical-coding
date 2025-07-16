@@ -82,7 +82,7 @@ class LabelCrossAttention(nn.Module):
         self.layernorm = nn.LayerNorm(input_size)
         self.num_classes = num_classes
         self.scale = scale
-        
+        print(num_classes, "= number of classes")
         # Store encoder model and tokenizer
         self.encoder_model = encoder_model
         self.encoder_tokenizer = encoder_tokenizer
@@ -115,11 +115,11 @@ class LabelCrossAttention(nn.Module):
         """Encode descriptions in batches to reduce memory usage."""
         all_embeddings = []
         num_descriptions = self.description_input_ids.size(0)
-        
+        print("Number of descriptions: ", num_descriptions)
         with torch.set_grad_enabled(self.training):
             for i in range(0, num_descriptions, self.desc_batch_size):
                 end_idx = min(i + self.desc_batch_size, num_descriptions)
-                
+                print("Current Batch index: ", i)
                 batch_input_ids = self.description_input_ids[i:end_idx]
                 batch_attention_mask = self.description_attention_mask[i:end_idx]
                 
