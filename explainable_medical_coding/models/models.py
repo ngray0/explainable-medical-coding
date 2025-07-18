@@ -59,7 +59,8 @@ class PLMICD(nn.Module):
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True
         )
-        self.roberta_encoder.gradient_checkpointing_enable()
+        # Selective gradient checkpointing: checkpoint only second half of layers
+        self._enable_selective_gradient_checkpointing()
 
         if cross_attention:
             from transformers import AutoTokenizer
@@ -88,6 +89,22 @@ class PLMICD(nn.Module):
             self.input_masker = InputMasker(
                 input_size=self.config.hidden_size, scale=scale
             )
+
+    def _enable_selective_gradient_checkpointing(self):
+        """Enable gradient checkpointing for only the second half of transformer layers."""
+        # Get total number of layers
+        total_layers = len(self.roberta_encoder.encoder.layer)
+        checkpoint_start = total_layers // 2
+        
+        # Disable global checkpointing first
+        self.roberta_encoder.gradient_checkpointing = False
+        
+        # Enable checkpointing only for second half of layers
+        for i in range(checkpoint_start, total_layers):
+            layer = self.roberta_encoder.encoder.layer[i]
+            layer.gradient_checkpointing = True
+            
+        print(f"Enabled gradient checkpointing for layers {checkpoint_start}-{total_layers-1} of {total_layers}")
 
     @torch.no_grad()
     def predict(
