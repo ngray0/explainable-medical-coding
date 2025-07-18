@@ -111,20 +111,6 @@ class LabelCrossAttention(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
     
-    def _encode_descriptions(self) -> torch.Tensor:
-        """Encode all descriptions at once (no batching)."""
-        with torch.set_grad_enabled(self.training):
-            desc_outputs = self.encoder_model(
-                input_ids=self.description_input_ids,
-                attention_mask=self.description_attention_mask
-            )
-
-            # Mean pooling with attention mask
-            attention_mask = self.description_attention_mask.unsqueeze(-1)
-            masked_embeddings = desc_outputs.last_hidden_state * attention_mask
-            all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
-
-        return all_embeddings
         
         # # Initialize weights
         # if init_with_descriptions and model_path and target_tokenizer is not None:
@@ -145,11 +131,13 @@ class LabelCrossAttention(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
         output_attention: bool = False,
         attn_grad_hook_fn: Optional[Callable] = None,
+        encoded_descriptions: Optional[torch.Tensor] = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Label Cross Attention mechanism
 
         Args:
             x (torch.Tensor): [batch_size, seq_len, input_size]
+            encoded_descriptions (torch.Tensor): Pre-encoded descriptions [num_classes, input_size]
 
         Returns:
             torch.Tensor: [batch_size, num_classes]
@@ -158,8 +146,8 @@ class LabelCrossAttention(nn.Module):
         V = self.weights_v(x)
         K = self.weights_k(x)
         
-        # Encode descriptions dynamically in batches
-        Q = self._encode_descriptions()
+        # Use pre-encoded descriptions
+        Q = encoded_descriptions
         
         # Q = self.label_representations
 

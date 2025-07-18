@@ -172,6 +172,21 @@ class PLMICD(nn.Module):
         )
         return embeddings[:, :sequence_length]
 
+    def _encode_descriptions(self) -> torch.Tensor:
+        """Encode all descriptions at once (no batching)."""
+        with torch.set_grad_enabled(self.training):
+            desc_outputs = self.label_wise_attention.encoder_model(
+                input_ids=self.label_wise_attention.description_input_ids,
+                attention_mask=self.label_wise_attention.description_attention_mask
+            )
+
+            # Mean pooling with attention mask
+            attention_mask = self.label_wise_attention.description_attention_mask.unsqueeze(-1)
+            masked_embeddings = desc_outputs.last_hidden_state * attention_mask
+            all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+
+        return all_embeddings
+
     def encoder(
         self,
         input_ids: torch.Tensor,
@@ -228,17 +243,24 @@ class PLMICD(nn.Module):
                 masked_chunked_input_embeddings, attention_masks
             )
         )
+        # Encode descriptions if using cross attention
+        encoded_descriptions = None
+        if hasattr(self.label_wise_attention, 'encoder_model'):
+            encoded_descriptions = self._encode_descriptions()
+        
         if output_mask:
             return self.label_wise_attention(
                 masked_token_representations,
                 attention_masks=attention_masks,
                 output_attention=output_attentions,
+                encoded_descriptions=encoded_descriptions,
             ), input_mask
 
         return self.label_wise_attention(
             masked_token_representations,
             attention_masks=attention_masks,
             output_attention=output_attentions,
+            encoded_descriptions=encoded_descriptions,
         )
 
     def get_token_representations_from_chunked_embeddings(
@@ -287,10 +309,16 @@ class PLMICD(nn.Module):
         token_representations = self.get_token_representations_from_chunked_embeddings(
             chunked_embedding, attention_masks
         )
+        # Encode descriptions if using cross attention
+        encoded_descriptions = None
+        if hasattr(self.label_wise_attention, 'encoder_model'):
+            encoded_descriptions = self._encode_descriptions()
+        
         return self.label_wise_attention(
             token_representations,
             attention_masks=attention_masks,
             output_attention=output_attention,
+            encoded_descriptions=encoded_descriptions,
         )
 
     @torch.no_grad()
@@ -344,12 +372,23 @@ class PLMICD(nn.Module):
                 input_ids, attention_masks, output_attentions, False
             )
         hidden_output = self.encoder(input_ids, attention_masks)
-        return self.label_wise_attention(
-            hidden_output,
-            attention_masks=attention_masks,
-            output_attention=output_attentions,
-            attn_grad_hook_fn=attn_grad_hook_fn,
-        )
+        # Encode descriptions if using cross attention
+        if hasattr(self.label_wise_attention, 'encoder_model'):
+            encoded_descriptions = self._encode_descriptions()
+            return self.label_wise_attention(
+                hidden_output,
+                attention_masks=attention_masks,
+                output_attention=output_attentions,
+                attn_grad_hook_fn=attn_grad_hook_fn,
+                encoded_descriptions=encoded_descriptions,
+            )
+        else:
+            return self.label_wise_attention(
+                hidden_output,
+                attention_masks=attention_masks,
+                output_attention=output_attentions,
+                attn_grad_hook_fn=attn_grad_hook_fn,
+            )
 
     @torch.no_grad()
     def get_encoder_attention_and_hidden_states(
