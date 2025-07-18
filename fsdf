@@ -1,0 +1,276 @@
+[33mcommit 10d99639e6ab22010ede1d82c613425c82858de9[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdeepspeed[m[33m, [m[1;31morigin/deepspeed[m[33m)[m
+Author: Nicky <nickygray45@gmail.com>
+Date:   Wed Jul 16 12:41:08 2025 +0100
+
+    deepspeed tweaks - not working yet
+
+[33mcommit 5965f0c272bc7d40b7eb6bc0355a447b2b4b9c2a[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Tue Jul 15 20:34:14 2025 +0100
+
+    Added DeepSpeed for CPU offloading grads + params
+
+[33mcommit 0ff9b35b85ed2da63b09e602a86a9ef90f1b7623[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Mon Jul 14 22:35:39 2025 +0100
+
+    dual encoding notes + descriptions
+
+[33mcommit 4cb745da5ee6a3df2f39653d9ad2ee047c14dc62[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Mon Jul 14 22:17:59 2025 +0100
+
+    dual encoding notes + descriptions
+
+[33mcommit 37d4f01efe89ee1ce067c40790ca33d42dbe9eb4[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/deepspeed-MultiGPU[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mdeepspeed-MultiGPU[m[33m)[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Wed Jul 9 13:28:54 2025 +0100
+
+    changed embeddings from learnable to buffer
+
+[33mcommit 2763fee6fd21383a1eb2e9b09fb8abb3b1d29cd3[m[33m ([m[1;31morigin/upstream-clean[m[33m, [m[1;32mupstream-clean[m[33m)[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Tue Jul 8 18:47:58 2025 +0100
+
+    Added TokenLevelDescriptionCrossAttention
+
+[33mcommit 950a78f78d34671763bb018f023ab4ca017593b1[m
+Author: Nicky <nickygray45@gmail.com>
+Date:   Mon Jul 7 21:48:18 2025 +0100
+
+    embeddings -> cuda
+
+[33mcommit 1ad4539fb0b08b20ef83ee58ab3f761948326ae3[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sun Jul 6 17:52:12 2025 +0100
+
+    Added init_with_descriptions to config
+
+[33mcommit 07233641bac41365955c5a254375d24bcf701fc1[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sun Jul 6 16:16:03 2025 +0100
+
+    debugging freezing params
+
+[33mcommit a3b6d3c71912a42c5af358c62c52d0034b80d3a2[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sun Jul 6 16:06:52 2025 +0100
+
+    debugging freezing params
+
+[33mcommit cce20cc5c9a7a3f47a4d66f73024d65a7b99aa14[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sun Jul 6 15:44:50 2025 +0100
+
+    debugging freezing params
+
+[33mcommit 9b668893565d163938d76fd46145c91dfc238d2b[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sun Jul 6 14:14:06 2025 +0100
+
+    Added freeze_label_embeddings to config
+
+[33mcommit b00a0c801160fcf2196e3e4fc56d3d7b6e6caf29[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sat Jul 5 18:12:53 2025 +0100
+
+    Code description embedding initialisation
+
+[33mcommit 305955f559900684f5736a6dac620cacdbb379e4[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Sat Jul 5 17:39:09 2025 +0100
+
+    Code description embedding initialisation
+
+[33mcommit 56d19a91e4bceb92929cea8ce4d591602e643f67[m
+Author: Nicky <nickygray45@gmail.com>
+Date:   Thu Jul 3 19:37:51 2025 +0100
+
+    NeoBERT addition
+
+[33mcommit 0525df2392f4d9c2ada37db7b607ea0837c8edd8[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Fri Jun 20 19:23:41 2025 +0100
+
+    Debugging trainer.py - grad norms
+
+[33mcommit ad492dfd36ec3a583d3be196a90fbd2c28b4923f[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Tue Jun 17 16:59:36 2025 +0100
+
+    removing files
+
+[33mcommit 6ad48d8b750b65fa7f45e34afa9b8e1d187596e1[m
+Author: ngray0 <nickygray45@gmail.com>
+Date:   Tue Jun 17 16:54:59 2025 +0100
+
+    Add ModernBERT model configuration
+    
+    🤖 Generated with [Claude Code](https://claude.ai/code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+[33mcommit c6557e3e0a26ef2c7d703a2d3240f5e044d4f218[m[33m ([m[1;33mtag: [m[1;33m0.0.1[m[33m, [m[1;31mupstream/main[m[33m)[m
+Merge: 8269cc7 9bdb260
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Tue May 20 11:21:12 2025 +0200
+
+    Merge pull request #8 from JoakimEdin/bug-fixes
+    
+    Bug fixes
+
+[33mcommit 9bdb2609a614fb18a30f8f07dba712651f38004a[m[33m ([m[1;31mupstream/bug-fixes[m[33m)[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Tue May 20 11:18:30 2025 +0200
+
+    Update train_plm.py
+
+[33mcommit 12dc8277db91e9e2b4b6845fe3223e7de1954c30[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Tue May 20 11:17:52 2025 +0200
+
+    Update tokenizer.py
+
+[33mcommit 8269cc7246b88fa5dd299191713ed7475b908537[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Sat Nov 9 12:15:31 2024 +0100
+
+    Update README.md
+
+[33mcommit 9f075e881c9d5d6427fb307e49a4a48cbda00ea1[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Wed Oct 2 12:57:16 2024 +0200
+
+    Update README.md
+
+[33mcommit c90b0f2e58745f60cac8ed036949feb0152d17d6[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Sep 27 14:51:26 2024 +0200
+
+    Update README.md
+
+[33mcommit 69efe61a2158463f96fc1e33cf24a9de82250240[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Wed Sep 4 15:10:20 2024 +0200
+
+    Update README.md
+
+[33mcommit 23dcf69c080fdef7b22d1ea3b81606d96fcbc480[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Sun Aug 25 14:02:41 2024 +0200
+
+    Update README.md
+
+[33mcommit 8f78bf360414b9ead5e653f4932c4c77c82308b1[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 14:19:15 2024 +0200
+
+    Update README.md
+
+[33mcommit 231230b88799aa92ac9b36b3addd95152506178c[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 11:42:41 2024 +0200
+
+    Update README.md
+
+[33mcommit d4024c3a16462c14a51689ae0c9f70010c5f4e41[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 11:42:05 2024 +0200
+
+    Update README.md
+
+[33mcommit ed302a1ce07780074ab315ef7bc09320838c08b4[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 11:34:09 2024 +0200
+
+    Update README.md
+
+[33mcommit d1352442ca9cbb9e0249f63813bc07f349c9b81d[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 11:27:57 2024 +0200
+
+    Update README.md
+
+[33mcommit c4bd3356f71123609467397d3e4c1d6b5dab2a51[m
+Author: Joakim Edin <joakim_edin@hotmail.com>
+Date:   Fri Jun 14 11:14:09 2024 +0200
+
+    Update README.md
+
+[33mcommit a2f78a25dc6c623f279d49a376d4c3f3e7c2620a[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 17:41:41 2024 +0000
+
+    add model weigths link
+
+[33mcommit 4c980945022d20fb5b17fb6e1d626ddea3c2fb7a[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 13:42:32 2024 +0000
+
+    add make prepare_everything
+
+[33mcommit 33c04ac8290a1bfd6aa485c314ae832bf23b04ae[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 13:09:52 2024 +0000
+
+    remove unused dataset
+
+[33mcommit 40db8a6da79fe756664046dea03dc6b428f4f814[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 13:00:44 2024 +0000
+
+    remove unused tensorflow
+
+[33mcommit 16a6528141c37b5ceb22c2fed9d621686b448cee[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 13:00:25 2024 +0000
+
+    add precommit
+
+[33mcommit 54ce3c7eba5091dcedf9422167bd979787e4d22a[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 12:59:45 2024 +0000
+
+    small update to makefile
+
+[33mcommit 9472e727fa4f3e346c41028c5e84a299a9681891[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 12:50:22 2024 +0000
+
+    small update to makefile
+
+[33mcommit 9cb571f1a9806c63c7502143a972a11bf0308d24[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 12:11:23 2024 +0000
+
+    delete unused code
+
+[33mcommit 030b5e56d1acd3b72a2fc834083b1eea1b570683[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 11:58:47 2024 +0000
+
+    move figures under results
+
+[33mcommit 4f9e90d3cd4ed21d30ee7dce6ba40cbf37adbce5[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 11:57:11 2024 +0000
+
+    add results
+
+[33mcommit 043a550c384c79b77f342c6a79fcb125326ae602[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 11:49:10 2024 +0000
+
+    add model folder
+
+[33mcommit e0dab5910cda9a600c1fdd77eb1e8f73f7ab6283[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 11:37:28 2024 +0000
+
+    add figures and gitignore
+
+[33mcommit 8db597c444f56600c26c522f7cbd76eaa03dde5c[m
+Author: Joakim Edin <Joakim Edin>
+Date:   Wed Jun 12 11:34:06 2024 +0000
+
+    first large commit

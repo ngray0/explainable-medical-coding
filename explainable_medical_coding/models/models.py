@@ -59,6 +59,7 @@ class PLMICD(nn.Module):
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True
         )
+        self.roberta_encoder.gradient_checkpointing_enable()
 
         if cross_attention:
             from transformers import AutoTokenizer
