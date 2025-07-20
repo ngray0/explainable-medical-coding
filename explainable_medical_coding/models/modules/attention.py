@@ -381,6 +381,10 @@ class TokenLevelCrossAttention(nn.Module):
         desc_mask = self.description_attention_mask.view(self.num_classes, -1, 1, 1)
         
         if attention_masks is not None:
+            # pad attention masks with 0 such that it has the same sequence length as x
+            attention_masks = torch.nn.functional.pad(
+                attention_masks, (0, x.size(1) - attention_masks.size(1)), value=0
+            )
             note_mask = attention_masks.view(1, 1, batch_size, note_seq_len)
             combined_mask = (desc_mask * note_mask).bool()
         else:
