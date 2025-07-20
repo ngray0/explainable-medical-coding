@@ -13,6 +13,7 @@ from explainable_medical_coding.models.modules.attention import (
     InputMasker,
     LabelAttention,
     LabelCrossAttention,
+    TokenLevelCrossAttention,
 )
 
 
@@ -40,6 +41,7 @@ class PLMICD(nn.Module):
         chunk_size: int,
         pad_token_id: int,
         cross_attention: bool = True,
+        attention_type: str = "label",  # "label", "token_level"
         scale: float = 1.0,
         mask_input: bool = False,
         target_tokenizer = None,
@@ -64,19 +66,34 @@ class PLMICD(nn.Module):
         if cross_attention:
             from transformers import AutoTokenizer
             encoder_tokenizer = AutoTokenizer.from_pretrained(model_path)
-            self.label_wise_attention = LabelCrossAttention(
-                input_size=self.config.hidden_size, 
-                num_classes=num_classes, 
-                scale=scale,
-                encoder_model=self.roberta_encoder,
-                encoder_tokenizer=encoder_tokenizer,
-                target_tokenizer=target_tokenizer,
-                icd_version=kwargs.get('icd_version', 10),
-                desc_batch_size=kwargs.get('desc_batch_size', 64),
-                # model_path=model_path,
-                # init_with_descriptions=kwargs.get('init_with_descriptions', True),
-                # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
-            )
+            
+            if attention_type == "token_level":
+                print("Using TokenLevelCrossAttention")
+                self.label_wise_attention = TokenLevelCrossAttention(
+                    input_size=self.config.hidden_size, 
+                    num_classes=num_classes, 
+                    scale=scale,
+                    encoder_model=self.roberta_encoder,
+                    encoder_tokenizer=encoder_tokenizer,
+                    target_tokenizer=target_tokenizer,
+                    icd_version=kwargs.get('icd_version', 10),
+                    desc_batch_size=kwargs.get('desc_batch_size', 64),
+                    max_desc_len=kwargs.get('max_desc_len', 64),
+                )
+            else:  # default to "label" 
+                self.label_wise_attention = LabelCrossAttention(
+                    input_size=self.config.hidden_size, 
+                    num_classes=num_classes, 
+                    scale=scale,
+                    encoder_model=self.roberta_encoder,
+                    encoder_tokenizer=encoder_tokenizer,
+                    target_tokenizer=target_tokenizer,
+                    icd_version=kwargs.get('icd_version', 10),
+                    desc_batch_size=kwargs.get('desc_batch_size', 64),
+                    # model_path=model_path,
+                    # init_with_descriptions=kwargs.get('init_with_descriptions', True),
+                    # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
+                )
         else:
             self.label_wise_attention = LabelAttention(
                 input_size=self.config.hidden_size,
@@ -180,12 +197,16 @@ class PLMICD(nn.Module):
                 attention_mask=self.label_wise_attention.description_attention_mask
             )
 
-            # Mean pooling with attention mask
-            attention_mask = self.label_wise_attention.description_attention_mask.unsqueeze(-1)
-            masked_embeddings = desc_outputs.last_hidden_state * attention_mask
-            all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
-
-        return all_embeddings
+            # Check if this is TokenLevelCrossAttention
+            if isinstance(self.label_wise_attention, TokenLevelCrossAttention):
+                # Return token-level embeddings for token-level attention
+                return desc_outputs.last_hidden_state
+            else:
+                # Mean pooling with attention mask for LabelCrossAttention
+                attention_mask = self.label_wise_attention.description_attention_mask.unsqueeze(-1)
+                masked_embeddings = desc_outputs.last_hidden_state * attention_mask
+                all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+                return all_embeddings
 
     def encoder(
         self,

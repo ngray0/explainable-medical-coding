@@ -290,6 +290,145 @@ class LabelCrossAttention(nn.Module):
     #     """Unfreeze the label representation parameters."""
     #     self.label_representations.requires_grad = True
 
+class TokenLevelCrossAttention(nn.Module):
+    """
+    Token-level cross-attention that takes encoded descriptions as input.
+    Similar to LabelCrossAttention but operates at token level instead of pooled level.
+    """
+    def __init__(
+        self, 
+        input_size: int, 
+        num_classes: int, 
+        scale: float = 1.0,
+        encoder_model = None,
+        encoder_tokenizer = None,
+        target_tokenizer = None,
+        icd_version: int = 10,
+        desc_batch_size: int = 64,
+        max_desc_len: int = 64
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.num_classes = num_classes
+        self.scale = scale / (input_size ** 0.5)
+        self.max_desc_len = max_desc_len
+
+        self.k_proj = nn.Linear(input_size, input_size, bias=False)
+        self.v_proj = nn.Linear(input_size, input_size, bias=False)
+        self.output_linear = nn.Linear(input_size, 1)
+        self.layernorm = nn.LayerNorm(input_size)
+        
+        # Store encoder model and tokenizer
+        self.encoder_model = encoder_model
+        self.encoder_tokenizer = encoder_tokenizer
+        self.desc_batch_size = desc_batch_size
+        
+        # Initialize tokenized descriptions as buffers
+        if target_tokenizer is not None:
+            self._init_description_tokens(target_tokenizer, icd_version, max_desc_len)
+        
+        # Initialize weights
+        self._init_weights(mean=0.0, std=0.03)
+    
+    def _init_description_tokens(self, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
+        """Initialize tokenized descriptions as buffers."""
+        code2desc = get_code2description_mimiciv_combined(icd_version)
+        descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
+        
+        tokens = self.encoder_tokenizer(
+            descriptions,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=max_desc_len,
+            padding="max_length"
+        )
+        
+        self.register_buffer("description_input_ids", tokens.input_ids)
+        self.register_buffer("description_attention_mask", tokens.attention_mask)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attention_masks: Optional[torch.Tensor] = None,
+        output_attention: bool = False,
+        attn_grad_hook_fn: Optional[Callable] = None,
+        encoded_descriptions: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """
+        Token-level cross-attention using encoded descriptions.
+
+        Args:
+            x (torch.Tensor): Clinical note embeddings. 
+                              Shape: [batch_size, note_seq_len, input_size]
+            attention_masks (torch.Tensor): Mask for the clinical note. 
+                                            Shape: [batch_size, note_seq_len]
+            encoded_descriptions (torch.Tensor): Pre-encoded descriptions [num_classes, max_desc_len, input_size]
+        Returns:
+            torch.Tensor: Logits for each class. Shape: [batch_size, num_classes]
+        """
+        batch_size, note_seq_len, _ = x.shape
+        
+        # Use pre-encoded descriptions directly as Q (no projection)
+        q_desc = encoded_descriptions                    # -> [num_classes, desc_seq, dim]
+        k_note = self.k_proj(x)                          # -> [batch, note_seq, dim]
+        v_note = self.v_proj(x)                          # -> [batch, note_seq, dim]
+
+        # 'c,d,b,n' = class, desc_seq, batch, note_seq
+        att_weights = torch.einsum('cdi,bni->cdbn', q_desc, k_note) * self.scale
+        # -> att_weights shape: [num_classes, desc_seq, batch_size, note_seq]
+
+        # Handle attention masks
+        desc_mask = self.description_attention_mask.view(self.num_classes, -1, 1, 1)
+        
+        if attention_masks is not None:
+            note_mask = attention_masks.view(1, 1, batch_size, note_seq_len)
+            combined_mask = (desc_mask * note_mask).bool()
+        else:
+            # If no note mask provided, only use description mask
+            combined_mask = desc_mask.bool()
+            combined_mask = combined_mask.expand(-1, -1, batch_size, note_seq_len)
+        
+        att_weights = att_weights.permute(2, 0, 1, 3)
+        combined_mask = combined_mask.permute(2, 0, 1, 3)
+        att_weights.masked_fill_(~combined_mask, -1e9)
+
+        attention = torch.softmax(att_weights, dim=-1)
+        
+        if attn_grad_hook_fn is not None:
+            attention.register_hook(attn_grad_hook_fn)
+        
+        # 'b,c,d,n' @ 'b,n,i' -> 'b,c,d,i'
+        context = torch.einsum('bcdn,bni->bcdi', attention, v_note)
+        # -> context shape: [batch, num_classes, desc_seq_len, input_size]
+        
+        desc_mask_for_pooling = self.description_attention_mask.view(1, self.num_classes, -1, 1)
+        context.masked_fill_(~desc_mask_for_pooling.bool(), 0)
+
+        pooled_context = context.sum(dim=2) / self.description_attention_mask.sum(dim=1).view(1, self.num_classes, 1)
+        # -> pooled_context shape: [batch, num_classes, input_size]
+
+        y = self.layernorm(pooled_context)
+        output = self.output_linear(y).squeeze(-1) # -> [batch, num_classes]
+        
+        if output_attention:
+            return output, att_weights
+
+        return output
+
+    def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
+        """
+        Initialise the weights
+
+        Args:
+            mean (float, optional): Mean of the normal distribution. Defaults to 0.0.
+            std (float, optional): Standard deviation of the normal distribution. Defaults to 0.03.
+        """
+        self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
+        self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
+        self.output_linear.weight = torch.nn.init.normal_(
+            self.output_linear.weight, mean, std
+        )
+
 class TokenLevelDescriptionCrossAttention(nn.Module):
     """
     Performs cross-attention where each code description (Query) attends to the
