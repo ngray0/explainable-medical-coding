@@ -305,13 +305,15 @@ class TokenLevelCrossAttention(nn.Module):
         target_tokenizer = None,
         icd_version: int = 10,
         desc_batch_size: int = 64,
-        max_desc_len: int = 64
+        max_desc_len: int = 64,
+        class_chunk_size: int = 500
     ):
         super().__init__()
         self.input_size = input_size
         self.num_classes = num_classes
         self.scale = scale / (input_size ** 0.5)
         self.max_desc_len = max_desc_len
+        self.class_chunk_size = class_chunk_size
 
         self.k_proj = nn.Linear(input_size, input_size, bias=False)
         self.v_proj = nn.Linear(input_size, input_size, bias=False)
@@ -368,53 +370,79 @@ class TokenLevelCrossAttention(nn.Module):
         """
         batch_size, note_seq_len, _ = x.shape
         
-        # Use pre-encoded descriptions directly as Q (no projection)
-        q_desc = encoded_descriptions                    # -> [num_classes, desc_seq, dim]
-        k_note = self.k_proj(x)                          # -> [batch, note_seq, dim]
-        v_note = self.v_proj(x)                          # -> [batch, note_seq, dim]
-
-        # 'c,d,b,n' = class, desc_seq, batch, note_seq
-        att_weights = torch.einsum('cdi,bni->cdbn', q_desc, k_note) * self.scale
-        # -> att_weights shape: [num_classes, desc_seq, batch_size, note_seq]
-
-        # Handle attention masks
-        desc_mask = self.description_attention_mask.view(self.num_classes, -1, 1, 1)
+        # Compute K and V once for all chunks
+        k_note = self.k_proj(x)  # -> [batch, note_seq, dim]
+        v_note = self.v_proj(x)  # -> [batch, note_seq, dim]
         
+        # Prepare note mask once
         if attention_masks is not None:
             # pad attention masks with 0 such that it has the same sequence length as x
             attention_masks = torch.nn.functional.pad(
                 attention_masks, (0, x.size(1) - attention_masks.size(1)), value=0
             )
             note_mask = attention_masks.view(1, 1, batch_size, note_seq_len)
-            combined_mask = (desc_mask * note_mask).bool()
         else:
-            # If no note mask provided, only use description mask
-            combined_mask = desc_mask.bool()
-            combined_mask = combined_mask.expand(-1, -1, batch_size, note_seq_len)
+            note_mask = None
         
-        att_weights = att_weights.permute(2, 0, 1, 3)
-        combined_mask = combined_mask.permute(2, 0, 1, 3)
-        att_weights.masked_fill_(~combined_mask, -1e9)
-
-        attention = torch.softmax(att_weights, dim=-1)
+        # Process classes in chunks to reduce memory usage
+        chunk_outputs = []
+        all_attention_weights = [] if output_attention else None
         
-        if attn_grad_hook_fn is not None:
-            attention.register_hook(attn_grad_hook_fn)
+        for chunk_start in range(0, self.num_classes, self.class_chunk_size):
+            chunk_end = min(chunk_start + self.class_chunk_size, self.num_classes)
+            chunk_size = chunk_end - chunk_start
+            
+            # Get chunk of encoded descriptions and masks
+            q_desc_chunk = encoded_descriptions[chunk_start:chunk_end]  # -> [chunk_size, desc_seq, dim]
+            desc_mask_chunk = self.description_attention_mask[chunk_start:chunk_end].view(chunk_size, -1, 1, 1)
+            
+            # Compute attention for this chunk
+            att_weights_chunk = torch.einsum('cdi,bni->cdbn', q_desc_chunk, k_note) * self.scale
+            # -> att_weights_chunk shape: [chunk_size, desc_seq, batch_size, note_seq]
+            
+            # Handle attention masks for this chunk
+            if note_mask is not None:
+                combined_mask_chunk = (desc_mask_chunk * note_mask).bool()
+            else:
+                combined_mask_chunk = desc_mask_chunk.bool()
+                combined_mask_chunk = combined_mask_chunk.expand(-1, -1, batch_size, note_seq_len)
+            
+            # Permute for masking
+            att_weights_chunk = att_weights_chunk.permute(2, 0, 1, 3)  # -> [batch, chunk_size, desc_seq, note_seq]
+            combined_mask_chunk = combined_mask_chunk.permute(2, 0, 1, 3)  # -> [batch, chunk_size, desc_seq, note_seq]
+            att_weights_chunk.masked_fill_(~combined_mask_chunk, -1e9)
+            
+            attention_chunk = torch.softmax(att_weights_chunk, dim=-1)
+            
+            if attn_grad_hook_fn is not None:
+                attention_chunk.register_hook(attn_grad_hook_fn)
+            
+            # Compute context for this chunk
+            context_chunk = torch.einsum('bcdn,bni->bcdi', attention_chunk, v_note)
+            # -> context_chunk shape: [batch, chunk_size, desc_seq_len, input_size]
+            
+            # Apply description mask for pooling
+            desc_mask_for_pooling_chunk = self.description_attention_mask[chunk_start:chunk_end].view(1, chunk_size, -1, 1)
+            context_chunk.masked_fill_(~desc_mask_for_pooling_chunk.bool(), 0)
+            
+            # Pool over sequence dimension
+            pooled_context_chunk = context_chunk.sum(dim=2) / self.description_attention_mask[chunk_start:chunk_end].sum(dim=1).view(1, chunk_size, 1)
+            # -> pooled_context_chunk shape: [batch, chunk_size, input_size]
+            
+            chunk_outputs.append(pooled_context_chunk)
+            
+            if output_attention:
+                all_attention_weights.append(att_weights_chunk)
         
-        # 'b,c,d,n' @ 'b,n,i' -> 'b,c,d,i'
-        context = torch.einsum('bcdn,bni->bcdi', attention, v_note)
-        # -> context shape: [batch, num_classes, desc_seq_len, input_size]
+        # Concatenate all chunk results
+        pooled_context = torch.cat(chunk_outputs, dim=1)  # -> [batch, num_classes, input_size]
         
-        desc_mask_for_pooling = self.description_attention_mask.view(1, self.num_classes, -1, 1)
-        context.masked_fill_(~desc_mask_for_pooling.bool(), 0)
-
-        pooled_context = context.sum(dim=2) / self.description_attention_mask.sum(dim=1).view(1, self.num_classes, 1)
-        # -> pooled_context shape: [batch, num_classes, input_size]
-
         y = self.layernorm(pooled_context)
-        output = self.output_linear(y).squeeze(-1) # -> [batch, num_classes]
+        output = self.output_linear(y).squeeze(-1)  # -> [batch, num_classes]
         
         if output_attention:
+            # Concatenate attention weights from all chunks
+            att_weights = torch.cat(all_attention_weights, dim=1)  # -> [batch, num_classes, desc_seq, note_seq]
             return output, att_weights
 
         return output
