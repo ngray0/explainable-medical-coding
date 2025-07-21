@@ -174,6 +174,7 @@ def get_metric_collection(
     number_of_classes: int,
     split_code_indices: Optional[torch.Tensor] = None,
     autoregressive: bool = False,
+    addition_recall_metrics: bool = False,
 ) -> metrics.MetricCollection:
     metric_list = []
     for metric in config:
@@ -181,6 +182,13 @@ def get_metric_collection(
         metric_list.append(
             metric_class(number_of_classes=number_of_classes, **metric["configs"])
         )
+    
+    # Add additional recall metrics if flag is enabled
+    if addition_recall_metrics:
+        for k in [50, 100, 200, 300]:
+            metric_list.append(
+                metrics.Recall_K(number_of_classes=number_of_classes, k=k)
+            )
 
     if split_code_indices is not None:
         code_indices = split_code_indices.clone()
@@ -200,6 +208,7 @@ def get_metric_collections(
     split_names: list[str] = ["train", "train_val", "validation", "test"],
     split2code_indices: Optional[dict[str, torch.Tensor]] = None,
     autoregressive: bool = False,
+    addition_recall_metrics: bool = False,
 ) -> dict[str, metrics.MetricCollection]:
     metric_collections: dict[str, metrics.MetricCollection] = {}
     for split_name in split_names:
@@ -213,6 +222,7 @@ def get_metric_collections(
             number_of_classes=number_of_classes,
             split_code_indices=split_code_indices,
             autoregressive=autoregressive,
+            addition_recall_metrics=addition_recall_metrics,
         )
     return metric_collections
 

@@ -158,6 +158,7 @@ def main(cfg: OmegaConf) -> None:
         number_of_classes=lookups.data_info["num_classes"],
         split2code_indices=lookups.split2code_indices,
         autoregressive=cfg.model.autoregressive,
+        addition_recall_metrics=cfg.addition_recall_metrics,
     )
 
     optimizer = factories.get_optimizer(config=cfg.optimizer, model=model)
