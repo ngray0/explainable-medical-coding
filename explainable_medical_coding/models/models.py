@@ -14,7 +14,7 @@ from explainable_medical_coding.models.modules.attention import (
     LabelAttention,
     LabelCrossAttention,
     LabelCrossAttentionDE,
-    TokenLevelCrossAttention,
+    TokenLevelDescriptionCrossAttention,
 )
 
 
@@ -71,7 +71,7 @@ class PLMICD(nn.Module):
             
             if attention_type == "token_level":
                 print("Using TokenLevelCrossAttention")
-                self.label_wise_attention = TokenLevelCrossAttention(
+                self.label_wise_attention = TokenLevelDescriptionCrossAttention(
                     input_size=self.config.hidden_size, 
                     num_classes=num_classes, 
                     scale=scale,
