@@ -13,6 +13,7 @@ from explainable_medical_coding.models.modules.attention import (
     InputMasker,
     LabelAttention,
     LabelCrossAttention,
+    LabelCrossAttentionDE,
     TokenLevelCrossAttention,
 )
 
@@ -53,6 +54,7 @@ class PLMICD(nn.Module):
         self.pad_token_id = pad_token_id
         self.module_names = RobertaModuleNames()
         self.gradient = None
+        self.attention_type = attention_type
 
         self.config = AutoConfig.from_pretrained(
             model_path, num_labels=num_classes, finetuning_task=None
@@ -80,8 +82,8 @@ class PLMICD(nn.Module):
                     desc_batch_size=kwargs.get('desc_batch_size', 64),
                     max_desc_len=kwargs.get('max_desc_len', 64),
                 )
-            else:  # default to "label" 
-                self.label_wise_attention = LabelCrossAttention(
+            elif attention_type == "dual_encoding":  # default to "label" 
+                self.label_wise_attention = LabelCrossAttentionDE(
                     input_size=self.config.hidden_size, 
                     num_classes=num_classes, 
                     scale=scale,
@@ -94,6 +96,13 @@ class PLMICD(nn.Module):
                     # init_with_descriptions=kwargs.get('init_with_descriptions', True),
                     # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
                 )
+            else:
+                self.label_wise_attention = LabelCrossAttention(
+                    input_size=self.config.hidden_size,
+                    projection_size=self.config.hidden_size,
+                    num_classes=num_classes,
+                )
+
         else:
             self.label_wise_attention = LabelAttention(
                 input_size=self.config.hidden_size,
@@ -393,8 +402,8 @@ class PLMICD(nn.Module):
                 input_ids, attention_masks, output_attentions, False
             )
         hidden_output = self.encoder(input_ids, attention_masks)
-        # Encode descriptions if using cross attention
-        if hasattr(self.label_wise_attention, 'encoder_model'):
+
+        if self.attention_type == "dual_encoding":
             encoded_descriptions = self._encode_descriptions()
             return self.label_wise_attention(
                 hidden_output,
