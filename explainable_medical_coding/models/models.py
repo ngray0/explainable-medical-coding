@@ -98,9 +98,7 @@ class PLMICD(nn.Module):
                 )
             else:
                 self.label_wise_attention = LabelCrossAttention(
-                    input_size=self.config.hidden_size,
-                    projection_size=self.config.hidden_size,
-                    num_classes=num_classes,
+                    input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
                 )
 
         else:
