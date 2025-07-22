@@ -200,6 +200,9 @@ class LabelCrossAttentionDE(nn.Module):
             max_length=64,
             padding=True
         )
+        print(f"First token ID: {tokens.input_ids[0, 0]}")
+        print(f"CLS token ID: {self.encoder_tokenizer.cls_token_id}")
+        print(f"Are they equal? {tokens.input_ids[0, 0] == self.encoder_tokenizer.cls_token_id}")
         
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
