@@ -205,7 +205,7 @@ class PLMICD(nn.Module):
             )
 
             # Check if this is TokenLevelCrossAttention
-            if isinstance(self.label_wise_attention, TokenLevelCrossAttention):
+            if isinstance(self.label_wise_attention, TokenLevelDescriptionCrossAttention):
                 # Return token-level embeddings for token-level attention
                 return desc_outputs.last_hidden_state
             else:
