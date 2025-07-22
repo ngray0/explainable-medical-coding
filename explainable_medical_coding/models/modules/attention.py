@@ -238,6 +238,7 @@ class LabelCrossAttentionDE(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
         output_attention: bool = False,
         attn_grad_hook_fn: Optional[Callable] = None,
+        encoded_descriptions= None
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Label Cross Attention mechanism
 
@@ -251,7 +252,7 @@ class LabelCrossAttentionDE(nn.Module):
         V = self.weights_v(x)
         K = self.weights_k(x)
         
-        Q = self._encode_descriptions()     
+        Q = encoded_descriptions    
         # Q = self.label_representations
 
         att_weights = Q.matmul(K.transpose(1, 2))
