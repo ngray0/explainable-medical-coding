@@ -84,50 +84,20 @@ class Trainer:
         self.on_end()
 
     def train_one_epoch(self, epoch: int) -> None:
+        """Train the model for one epoch.
+
+        Args:
+            epoch (int): The current epoch.
+        """
         self.model.train()
-        # Debug: Check requires_grad at start of training
-        if hasattr(self.model, 'label_wise_attention') and hasattr(self.model.label_wise_attention, 'label_representations'):
-            print(f"Start of epoch {epoch} - label_representations.requires_grad: {self.model.label_wise_attention.label_representations.requires_grad}")
         self.on_train_begin()
-
-        # ── DEBUG: choose a parameter you expect to update every step
-        # If ModernBERT follows BERT naming, this will exist; otherwise
-        # pick any param that has requires_grad=True.
-        # Check embedding layer requires_grad based on model type
-        if hasattr(self.model.roberta_encoder, 'embeddings.tok_embeddings'):
-            # ModernBERT
-            print(f"tok_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.tok_embeddings.weight.requires_grad}")
-            param_ref = self.model.roberta_encoder.embeddings.tok_embeddings.weight
-        elif hasattr(self.model.roberta_encoder, 'embeddings.word_embeddings'):
-            # RoBERTa
-            print(f"word_embeddings.requires_grad: {self.model.roberta_encoder.embeddings.word_embeddings.weight.requires_grad}")
-            param_ref = self.model.roberta_encoder.embeddings.word_embeddings.weight
-        else:
-            # Automatically find first parameter with gradients
-            param_ref = None
-            for name, param in self.model.roberta_encoder.named_parameters():
-                if param.requires_grad:
-                    print(f"Found first parameter with grad: {name}, requires_grad: {param.requires_grad}")
-                    param_ref = param
-                    break
-            if param_ref is None:
-                print("Warning: No parameters with requires_grad=True found in roberta_encoder")
-                # Fallback: just get the first parameter
-                for name, param in self.model.roberta_encoder.named_parameters():
-                    print(f"Using first parameter as fallback: {name}")
-                    param_ref = param
-                    break
-        # Or check all embedding-related parameters
-        print("\nEmbedding parameters and their requires_grad status:")
-        for name, param in self.model.named_parameters():
-            if 'embedding' in name.lower():
-                print(f"{name}: requires_grad={param.requires_grad}")
-
         num_batches = len(self.dataloaders["train"])
         for batch_idx, batch in enumerate(
             track(self.dataloaders["train"], description=f"Epoch: {epoch} | Training")
         ):
-            with torch.autocast(device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16):
+            with torch.autocast(
+                device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
+            ):
                 batch = batch.to(self.device)
                 y_probs, targets, loss = self.loss_function(
                     batch,
@@ -136,59 +106,27 @@ class Trainer:
                     epoch=epoch,
                 )
                 loss = loss / self.accumulate_grad_batches
-
-            # Scale and compute gradients
-            scaled_loss = self.gradient_scaler.scale(loss)
-            scaled_loss.backward()
-            
-            # Debug: Check if label_representations has gradients (should be None if frozen)
-            if hasattr(self.model, 'label_wise_attention') and hasattr(self.model.label_wise_attention, 'label_representations'):
-                if batch_idx == 0:  # Only print for first batch to avoid spam
-                    label_param = self.model.label_wise_attention.label_representations
-                    print(f"After backward() - requires_grad: {label_param.requires_grad}, grad is None: {label_param.grad is None}")
-
+            self.gradient_scaler.scale(loss).backward()
             if ((batch_idx + 1) % self.accumulate_grad_batches == 0) or (
                 batch_idx + 1 == num_batches
             ):
-                # Snapshot BEFORE optimiser step for gradient monitoring
-                before = param_ref[0, :5].detach().cpu().clone()
-                
-                # Unscale gradients first to get true gradient norm
-                if self.use_amp:
-                    self.gradient_scaler.unscale_(self.optimizer)
-                
-                # Calculate gradient norm
-                if param_ref.grad is not None:
-                    grad_norm = param_ref.grad.data.norm().item()
-                else:
-                    grad_norm = 0.0
-
-                # Additional gradient clipping if configured
                 if self.config.trainer.clip_grad_norm:
+                    self.gradient_scaler.unscale_(self.optimizer)
+                    # torch.nn.utils.clip_grad_value_(norm=self.model.parameters(), clip_value=self.config.trainer.clip_value)
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), self.config.trainer.clip_grad_norm
                     )
-
                 self.gradient_scaler.step(self.optimizer)
                 self.gradient_scaler.update()
-                if self.lr_scheduler is not None and not isinstance(
-                    self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
-                ):
-                    self.lr_scheduler.step()
+                if self.lr_scheduler is not None:
+                    if not isinstance(
+                        self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+                    ):
+                        self.lr_scheduler.step()
                 self.optimizer.zero_grad()
-
-                # Snapshot AFTER optimiser step and show progress for first 50 batches
-                after = param_ref[0, :5].detach().cpu().clone()
-                delta = (after - before).abs().max().item()
-
-                if batch_idx < 50:
-                    print(
-                        f"[Epoch {epoch} | Batch {batch_idx}] "
-                        f"grad_norm={grad_norm:.4f}  Δmax={delta:.6e}"
-                    )
-
-            self.update_metrics(y_probs=y_probs, targets=targets, loss=loss, split_name="train")
-
+            self.update_metrics(
+                y_probs=y_probs, targets=targets, loss=loss, split_name="train"
+            )
         self.on_train_end(epoch)
 
     @torch.no_grad()
