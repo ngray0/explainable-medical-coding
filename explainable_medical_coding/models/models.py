@@ -5,6 +5,7 @@ import torch.utils.checkpoint
 from pydantic import BaseModel
 from torch import nn
 from transformers import AutoConfig, AutoModel
+from transformers import AutoTokenizer
 
 from explainable_medical_coding.explainability.helper_functions import (
     create_baseline_input,
@@ -15,6 +16,7 @@ from explainable_medical_coding.models.modules.attention import (
     LabelCrossAttention,
     LabelCrossAttentionDE,
     TokenLevelDescriptionCrossAttention,
+    DynamicTokenLevelCrossAttention,
 )
 
 
@@ -63,26 +65,50 @@ class PLMICD(nn.Module):
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True
         )
-        self.roberta_encoder.gradient_checkpointing_enable()
+        if attention_type == "dual_encoding":
+            self.roberta_encoder.gradient_checkpointing_enable()
+
+        # For two-stage retrieval: add frozen encoder for Stage 1
+        if attention_type == "token_level":
+            print("Creating frozen encoder for Stage 1 retrieval")
+            self.frozen_encoder = AutoModel.from_pretrained(
+                model_path, config=self.config, trust_remote_code=True
+            )
+            # Freeze all parameters
+            for param in self.frozen_encoder.parameters():
+                param.requires_grad = False
 
         if cross_attention:
-            from transformers import AutoTokenizer
             encoder_tokenizer = AutoTokenizer.from_pretrained(model_path)
             
             if attention_type == "token_level":
                 print("Using TokenLevelCrossAttention")
-                self.label_wise_attention = TokenLevelDescriptionCrossAttention(
-                    input_size=self.config.hidden_size, 
-                    num_classes=num_classes, 
+                # self.token_level_attention = TokenLevelDescriptionCrossAttention(
+                #     input_size=self.config.hidden_size, 
+                #     num_classes=num_classes, 
+                #     scale=scale,
+                #     encoder_model=self.roberta_encoder,
+                #     encoder_tokenizer=encoder_tokenizer,
+                #     target_tokenizer=target_tokenizer,
+                #     icd_version=kwargs.get('icd_version', 10),
+                #     desc_batch_size=kwargs.get('desc_batch_size', 64),
+                #     max_desc_len=kwargs.get('max_desc_len', 64),
+                # )
+    
+                self.label_wise_attention = LabelCrossAttention(
+                    input_size=self.config.hidden_size, num_classes=num_classes, scale=scale
+                )
+                
+                # Dynamic token-level attention for two-stage retrieval
+                self._dynamic_token_attention = DynamicTokenLevelCrossAttention(
+                    input_size=self.config.hidden_size,
                     scale=scale,
-                    encoder_model=self.roberta_encoder,
                     encoder_tokenizer=encoder_tokenizer,
                     target_tokenizer=target_tokenizer,
                     icd_version=kwargs.get('icd_version', 10),
-                    desc_batch_size=kwargs.get('desc_batch_size', 64),
-                    max_desc_len=kwargs.get('max_desc_len', 64),
+                    max_desc_len=kwargs.get('max_desc_len', 64)
                 )
-            elif attention_type == "dual_encoding":  # default to "label" 
+            elif attention_type == "dual_encoding":
                 self.label_wise_attention = LabelCrossAttentionDE(
                     input_size=self.config.hidden_size, 
                     num_classes=num_classes, 
@@ -196,6 +222,25 @@ class PLMICD(nn.Module):
         )
         return embeddings[:, :sequence_length]
 
+    def _frozen_encoder(
+        self,
+        input_ids: torch.Tensor,
+        attention_masks: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Use frozen encoder for Stage 1 retrieval."""
+        input_ids = self.split_input_into_chunks(input_ids, self.pad_token_id)
+        if attention_masks is not None:
+            attention_masks = self.get_chunked_attention_masks(attention_masks)
+        batch_size, num_chunks, chunk_size = input_ids.size()
+        outputs = self.frozen_encoder(
+            input_ids=input_ids.view(-1, chunk_size),
+            attention_mask=attention_masks.view(-1, chunk_size)
+            if attention_masks is not None
+            else None,
+            return_dict=False,
+        )
+        return outputs[0].view(batch_size, num_chunks * chunk_size, -1)
+
     def _encode_descriptions(self) -> torch.Tensor:
         """Encode all descriptions at once (no batching)."""
         with torch.set_grad_enabled(self.training):
@@ -212,6 +257,41 @@ class PLMICD(nn.Module):
                 # Mean pooling with attention mask for LabelCrossAttention
                 cls_embeddings = desc_outputs.last_hidden_state[:, 0, :]
                 return cls_embeddings
+
+    def _encode_subset_descriptions(self, top_k_indices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode only the descriptions for the given top-k indices."""
+        # Select descriptions for top-k indices - assume single batch for now
+        top_k_indices = top_k_indices.squeeze(0)  # Remove batch dimension
+        
+        subset_input_ids = self._dynamic_token_attention.description_input_ids[top_k_indices]  # [k, seq_len]
+        subset_attention_mask = self._dynamic_token_attention.description_attention_mask[top_k_indices]  # [k, seq_len]
+        
+        # Encode subset of descriptions using the trainable encoder
+        with torch.set_grad_enabled(self.training):
+            desc_outputs = self.roberta_encoder(
+                input_ids=subset_input_ids,
+                attention_mask=subset_attention_mask
+            )
+            
+            # Return [k, desc_seq, dim] and [k, desc_seq]
+            return desc_outputs.last_hidden_state, subset_attention_mask
+
+
+    def expand_topk_to_full_logits(
+        self, 
+        top_k_logits: torch.Tensor, 
+        top_k_indices: torch.Tensor
+    ) -> torch.Tensor:
+        """Expand top-k logits to full class space for compatibility with metrics."""
+        batch_size = top_k_logits.size(0)
+        full_logits = torch.full(
+            (batch_size, self.num_classes), 
+            float('-inf'), 
+            device=top_k_logits.device, 
+            dtype=top_k_logits.dtype
+        )
+        full_logits.scatter_(dim=1, index=top_k_indices, src=top_k_logits)
+        return full_logits
 
     def encoder(
         self,
@@ -392,11 +472,44 @@ class PLMICD(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         attn_grad_hook_fn: Optional[Callable] = None,
+        top_k: Optional[int] = None,
+        targets: Optional[torch.Tensor] = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if self.mask_input:
             return self.forward_with_input_masking(
                 input_ids, attention_masks, output_attentions, False
             )
+        
+        # Stage 1: Retrieval mode with frozen encoder
+        if top_k is not None:
+            # Stage 1: Use frozen encoder for retrieval
+            with torch.no_grad():
+                frozen_hidden_output = self._frozen_encoder(input_ids, attention_masks)
+                logits = self.label_wise_attention(
+                    frozen_hidden_output,
+                    attention_masks=attention_masks,
+                    output_attention=False,
+                )
+                
+                # Get top-k indices from logits
+                top_k_scores, top_k_indices = torch.topk(logits, k=top_k, dim=-1)
+            
+            # Stage 2: Use trainable encoder for token-level attention
+            trainable_hidden_output = self.encoder(input_ids, attention_masks)
+            top_k_encoded_descriptions, top_k_desc_mask = self._encode_subset_descriptions(top_k_indices)
+            
+            top_k_logits = self._dynamic_token_attention(
+                trainable_hidden_output,
+                top_k_encoded_descriptions,
+                top_k_desc_mask,
+                attention_masks,
+            )
+            
+            # Expand top-k logits to full class space for compatibility
+            full_logits = self.expand_topk_to_full_logits(top_k_logits, top_k_indices)
+            return full_logits
+        
+        # Normal forward pass
         hidden_output = self.encoder(input_ids, attention_masks)
 
         if self.attention_type == "dual_encoding":
