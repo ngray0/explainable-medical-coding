@@ -54,10 +54,12 @@ class PLMICD(nn.Module):
         self.gradient = None
 
         self.config = AutoConfig.from_pretrained(
-            model_path, num_labels=num_classes, finetuning_task=None
+            model_path, 
+            num_labels=num_classes, 
+            finetuning_task=None,
+            hidden_dropout_prob=dropout_prob,
+            attention_probs_dropout_prob=dropout_prob
         )
-        self.config.hidden_dropout_prob = dropout_prob
-        self.config.attention_probs_dropout_prob = dropout_prob
 
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True
