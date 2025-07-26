@@ -43,6 +43,7 @@ class PLMICD(nn.Module):
         scale: float = 1.0,
         mask_input: bool = False,
         target_tokenizer = None,
+        dropout_prob: float = 0.2,
         **kwargs,
     ):
         super().__init__()
@@ -55,6 +56,8 @@ class PLMICD(nn.Module):
         self.config = AutoConfig.from_pretrained(
             model_path, num_labels=num_classes, finetuning_task=None
         )
+        self.config.hidden_dropout_prob = dropout_prob
+        self.config.attention_probs_dropout_prob = dropout_prob
 
         self.roberta_encoder = AutoModel.from_pretrained(
             model_path, config=self.config, trust_remote_code=True
