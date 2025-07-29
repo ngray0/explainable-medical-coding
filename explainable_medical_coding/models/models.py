@@ -43,7 +43,7 @@ class PLMICD(nn.Module):
         scale: float = 1.0,
         mask_input: bool = False,
         target_tokenizer = None,
-        dropout_prob: float = 0.2,
+        dropout_prob: float = 0.1,
         **kwargs,
     ):
         super().__init__()

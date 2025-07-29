@@ -10,4 +10,4 @@ configs:
   mask_input: false
   freeze_label_embeddings: false
   init_with_descriptions: true
-  dropout_prob: 0.2
+  dropout_prob: 0.1
