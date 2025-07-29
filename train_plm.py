@@ -117,9 +117,9 @@ def main(cfg: OmegaConf) -> None:
             LOGGER.info("Creating token-level model and loading compatible weights")
             model = factories.get_model(config=cfg.model, data_info=lookups.data_info, target_tokenizer=target_tokenizer)
             
-            # Load saved weights (ignore missing keys for new components)
-            saved_state_dict = torch.load(model_path / "best_model.pt", map_location=device)
-            missing_keys, unexpected_keys = model.load_state_dict(saved_state_dict, strict=False)
+            # Load saved weights (following the same pattern as load_trained_model)
+            checkpoint = torch.load(model_path / "best_model.pt", map_location=device)
+            missing_keys, unexpected_keys = model.load_state_dict(checkpoint["model"], strict=False)
             LOGGER.info(f"Missing keys (randomly initialized): {len(missing_keys)}")
             LOGGER.info(f"Unexpected keys (ignored): {len(unexpected_keys)}")
             
@@ -134,7 +134,7 @@ def main(cfg: OmegaConf) -> None:
             
             print(f"\n=== LABEL_WISE_ATTENTION KEYS ANALYSIS ===")
             print("Keys in saved model:")
-            saved_label_keys = [k for k in saved_state_dict.keys() if 'label_wise_attention' in k]
+            saved_label_keys = [k for k in checkpoint["model"].keys() if 'label_wise_attention' in k]
             for key in sorted(saved_label_keys):
                 print(f"  {key}")
             
@@ -153,7 +153,7 @@ def main(cfg: OmegaConf) -> None:
                     param.requires_grad = False
                 LOGGER.info("Frozen encoder parameters set to requires_grad=False")
             
-            decision_boundary = saved_state_dict.get("decision_boundary", None)
+            decision_boundary = checkpoint.get("db", None)
         else:
             model, decision_boundary = load_trained_model(
                 model_path,
