@@ -123,6 +123,27 @@ def main(cfg: OmegaConf) -> None:
             LOGGER.info(f"Missing keys (randomly initialized): {len(missing_keys)}")
             LOGGER.info(f"Unexpected keys (ignored): {len(unexpected_keys)}")
             
+            # Print detailed key information for debugging
+            print("\n=== MISSING KEYS (not loaded from saved model) ===")
+            for key in missing_keys:
+                print(f"  {key}")
+            
+            print("\n=== UNEXPECTED KEYS (in saved model but not in current model) ===")  
+            for key in unexpected_keys:
+                print(f"  {key}")
+            
+            print(f"\n=== LABEL_WISE_ATTENTION KEYS ANALYSIS ===")
+            print("Keys in saved model:")
+            saved_label_keys = [k for k in saved_state_dict.keys() if 'label_wise_attention' in k]
+            for key in sorted(saved_label_keys):
+                print(f"  {key}")
+            
+            print("Keys in current model:")
+            current_label_keys = [k for k, v in model.named_parameters() if 'label_wise_attention' in k]
+            for key in sorted(current_label_keys):
+                print(f"  {key}")
+            print("="*50)
+            
             # Copy trained roberta_encoder weights to frozen_encoder
             if hasattr(model, 'frozen_encoder'):
                 LOGGER.info("Copying trained weights from roberta_encoder to frozen_encoder")
