@@ -9,6 +9,7 @@ from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv())
 
 import hydra
+import torch
 from datasets import load_dataset
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
