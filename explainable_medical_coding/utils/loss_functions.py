@@ -71,6 +71,7 @@ def one_hot_encode_evidence_token_ids(
 def binary_cross_entropy_loss(
     batch: Batch,
     model: torch.nn.Module,
+    top_k: int = None,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     input_ids, targets, attention_masks = (
@@ -78,7 +79,7 @@ def binary_cross_entropy_loss(
         batch.targets,
         batch.attention_masks,
     )
-    logits = model(input_ids, attention_masks)
+    logits = model(input_ids, attention_masks, top_k=top_k)
     loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets)
     return torch.sigmoid(logits), targets, loss
 

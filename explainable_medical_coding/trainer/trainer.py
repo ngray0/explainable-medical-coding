@@ -104,6 +104,7 @@ class Trainer:
                     model=self.model,
                     scale=self.gradient_scaler.get_scale(),
                     epoch=epoch,
+                    top_k=getattr(self.config, 'top_k', None),
                 )
                 loss = loss / self.accumulate_grad_batches
             self.gradient_scaler.scale(loss).backward()
@@ -148,7 +149,7 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device), model=self.model, top_k=getattr(self.config, 'top_k', None)
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -177,7 +178,7 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model
+                    batch.to(self.device), model=self.model, top_k=getattr(self.config, 'top_k', None)
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name

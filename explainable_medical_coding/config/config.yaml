@@ -23,3 +23,4 @@ debug: false
 load_model: null # The path where to find the model, text encoder and label encoder
 distillation: false
 addition_recall_metrics: false # Enable additional recall@k metrics (50, 100, 200, 300)
+top_k: null # For token-level attention: number of top candidates for Stage 2 (set to enable two-stage mode)

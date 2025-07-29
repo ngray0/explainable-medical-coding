@@ -110,12 +110,35 @@ def main(cfg: OmegaConf) -> None:
     else:
         LOGGER.info("Loading Model from model_path")
         saved_config = OmegaConf.load(model_path / "config.yaml")
-        model, decision_boundary = load_trained_model(
-            model_path,
-            saved_config,
-            pad_token_id=text_tokenizer.pad_token_id,
-            device=device,
-        )
+        
+        # For token-level attention, create new model with current config then load weights
+        if cfg.model.configs.get('attention_type') == 'token_level':
+            LOGGER.info("Creating token-level model and loading compatible weights")
+            model = factories.get_model(config=cfg.model, data_info=lookups.data_info, target_tokenizer=target_tokenizer)
+            
+            # Load saved weights (ignore missing keys for new components)
+            saved_state_dict = torch.load(model_path / "best_model.pt", map_location=device)
+            missing_keys, unexpected_keys = model.load_state_dict(saved_state_dict, strict=False)
+            LOGGER.info(f"Missing keys (randomly initialized): {len(missing_keys)}")
+            LOGGER.info(f"Unexpected keys (ignored): {len(unexpected_keys)}")
+            
+            # Copy trained roberta_encoder weights to frozen_encoder
+            if hasattr(model, 'frozen_encoder'):
+                LOGGER.info("Copying trained weights from roberta_encoder to frozen_encoder")
+                model.frozen_encoder.load_state_dict(model.roberta_encoder.state_dict())
+                # Freeze the frozen encoder parameters
+                for param in model.frozen_encoder.parameters():
+                    param.requires_grad = False
+                LOGGER.info("Frozen encoder parameters set to requires_grad=False")
+            
+            decision_boundary = saved_state_dict.get("decision_boundary", None)
+        else:
+            model, decision_boundary = load_trained_model(
+                model_path,
+                saved_config,
+                pad_token_id=text_tokenizer.pad_token_id,
+                device=device,
+            )
 
     model.to(device)
     # Debug: Check requires_grad after moving to device
