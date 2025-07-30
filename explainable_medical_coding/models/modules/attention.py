@@ -641,8 +641,8 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.scale = scale / (input_size ** 0.5)
 
         # Removed q_proj - use raw description embeddings
-        self.k_proj = nn.Linear(input_size, input_size, bias=False)
-        self.v_proj = nn.Linear(input_size, input_size, bias=False)
+        # self.k_proj = nn.Linear(input_size, input_size, bias=False)
+        # self.v_proj = nn.Linear(input_size, input_size, bias=False)
         self.output_linear = nn.Linear(input_size, 1)
         self.layernorm = nn.LayerNorm(input_size)
         
@@ -669,8 +669,8 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
     def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
-        self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
-        self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
+        # self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
+        # self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
         self.output_linear.weight = torch.nn.init.normal_(
             self.output_linear.weight, mean, std
         )
@@ -702,8 +702,8 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         
         # Use raw description embeddings as queries (no projection)
         q_desc = encoded_descriptions                # -> [k, desc_seq, dim]
-        k_note = self.k_proj(x)                     # -> [batch, note_seq, dim]
-        v_note = self.v_proj(x)                     # -> [batch, note_seq, dim]
+        k_note = x                     # -> [batch, note_seq, dim]
+        v_note = x                     # -> [batch, note_seq, dim]
 
         # Cross attention: descriptions attend to note tokens
         # 'k,d,b,n' = num_classes, desc_seq, batch, note_seq

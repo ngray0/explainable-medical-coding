@@ -493,6 +493,20 @@ class PLMICD(nn.Module):
                 
                 # Get top-k indices from logits
                 top_k_scores, top_k_indices = torch.topk(logits, k=top_k, dim=-1)
+                
+                # During training, ensure all true targets are included
+                if self.training and targets is not None:
+                    batch_size = targets.size(0)
+                    for batch_idx in range(batch_size):
+                        # Get true target indices for this sample
+                        true_targets = targets[batch_idx].nonzero(as_tuple=False).squeeze(-1)
+                        if len(true_targets) > 0:
+                            # Start with true targets, then add top-k predictions (filtering out duplicates)
+                            mask = ~torch.isin(top_k_indices[batch_idx], true_targets)
+                            remaining_predictions = top_k_indices[batch_idx][mask]
+                            needed = top_k - len(true_targets)
+                            final_indices = torch.cat([true_targets, remaining_predictions[:needed]])
+                            top_k_indices[batch_idx] = final_indices
             
             # Stage 2: Use trainable encoder for token-level attention
             trainable_hidden_output = self.encoder(input_ids, attention_masks)
