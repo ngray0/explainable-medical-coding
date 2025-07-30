@@ -668,6 +668,49 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
+    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, max_desc_len: int) -> None:
+        """Initialize tokenized descriptions with random text as buffers."""
+        import random
+        import string
+        
+        def generate_random_text():
+            """Generate random text with characters and spaces."""
+            result = []
+            remaining_length = random.randint(50, 320)  # Total character budget
+            
+            while remaining_length > 0:
+                # Add random characters (3-10 chars)
+                char_length = min(random.randint(3, 10), remaining_length)
+                chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
+                result.append(chars)
+                remaining_length -= char_length
+                
+                # Add space if there's still length remaining
+                if remaining_length > 0:
+                    result.append(' ')
+                    remaining_length -= 1
+            
+            return ''.join(result)
+        
+        # Generate random text for each target
+        descriptions = []
+        random.seed(42)  # For reproducibility
+        for i in range(len(target_tokenizer)):
+            desc = generate_random_text()
+            descriptions.append(desc)
+        
+        # Tokenize the random descriptions (this creates the input_ids and attention_mask)
+        tokens = encoder_tokenizer(
+            descriptions,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=max_desc_len,
+            padding=True
+        )
+        
+        self.register_buffer("description_input_ids", tokens.input_ids)
+        self.register_buffer("description_attention_mask", tokens.attention_mask)
+
     def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
         # self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
         # self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
