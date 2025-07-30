@@ -45,6 +45,7 @@ class PLMICD(nn.Module):
         pad_token_id: int,
         cross_attention: bool = True,
         attention_type: str = "label",  # "label", "token_level"
+        random_init: bool = False,
         scale: float = 1.0,
         mask_input: bool = False,
         target_tokenizer = None,
@@ -118,6 +119,7 @@ class PLMICD(nn.Module):
                     target_tokenizer=target_tokenizer,
                     icd_version=kwargs.get('icd_version', 10),
                     desc_batch_size=kwargs.get('desc_batch_size', 64),
+                    random_init=random_init,
                     # model_path=model_path,
                     # init_with_descriptions=kwargs.get('init_with_descriptions', True),
                     # freeze_label_embeddings=kwargs.get('freeze_label_embeddings', False)
