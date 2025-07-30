@@ -257,8 +257,10 @@ class PLMICD(nn.Module):
                 return desc_outputs.last_hidden_state
             else:
                 # Mean pooling with attention mask for LabelCrossAttention
-                cls_embeddings = desc_outputs.last_hidden_state[:, 0, :]
-                return cls_embeddings
+                attention_mask = self.label_wise_attention.description_attention_mask.unsqueeze(-1)
+                masked_embeddings = desc_outputs.last_hidden_state * attention_mask
+                all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+                return all_embeddings
 
     def _encode_subset_descriptions(self, top_k_indices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode only the descriptions for the given top-k indices."""
