@@ -161,6 +161,7 @@ class LabelCrossAttentionDE(nn.Module):
         target_tokenizer = None,
         icd_version: int = 10,
         desc_batch_size: int = 64,
+        random_init: bool = False,
         # init_with_descriptions: bool = False,
         # model_path: str = None,
         # freeze_label_embeddings: bool = False
@@ -181,7 +182,10 @@ class LabelCrossAttentionDE(nn.Module):
         
         # Initialize tokenized descriptions as buffers
         if target_tokenizer is not None:
-            self._init_description_tokens(target_tokenizer, icd_version)
+            if random_init== False:
+                self._init_description_tokens(target_tokenizer, icd_version)
+            else: self._init_description_tokens_random(
+                encoder_tokenizer, target_tokenizer, max_desc_len=64)
         
         # Initialize weights
         self._init_weights(mean=0.0, std=0.03)
@@ -205,33 +209,48 @@ class LabelCrossAttentionDE(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
     
-    def _encode_descriptions(self) -> torch.Tensor:
-        """Encode all descriptions"""
-        with torch.set_grad_enabled(self.training):
-            desc_outputs = self.encoder_model(
-                input_ids=self.description_input_ids,
-                attention_mask=self.description_attention_mask
-            )
-
-            # Mean pooling with attention mask
-            attention_mask = self.description_attention_mask.unsqueeze(-1)
-            masked_embeddings = desc_outputs.last_hidden_state * attention_mask
-            all_embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
-
-        return all_embeddings
+    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, max_desc_len: int) -> None:
+        """Initialize tokenized descriptions with random text as buffers."""
+        import random
+        import string
         
-        # # Initialize weights
-        # if init_with_descriptions and model_path and target_tokenizer is not None:
-        #     self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
-        # else:
-        #     self._init_weights(mean=0.0, std=0.03)
-        # 
-        # # Freeze label embeddings if requested
-        # if freeze_label_embeddings:
-        #     self.freeze_label_embeddings()
-        # 
-        # # Print requires_grad status for debugging
-        # print(f"LabelCrossAttention - label_representations.requires_grad: {self.label_representations.requires_grad}")
+        def generate_random_text():
+            """Generate random text with characters and spaces."""
+            result = []
+            remaining_length = random.randint(30, 130)  # Total character budget
+            
+            while remaining_length > 0:
+                # Add random characters (3-10 chars)
+                char_length = min(random.randint(3, 10), remaining_length)
+                chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
+                result.append(chars)
+                remaining_length -= char_length
+                
+                # Add space if there's still length remaining
+                if remaining_length > 0:
+                    result.append(' ')
+                    remaining_length -= 1
+            
+            return ''.join(result)
+        
+        # Generate random text for each target
+        descriptions = []
+        for i in range(len(target_tokenizer)):
+            desc = generate_random_text()
+            descriptions.append(desc)
+        
+        # Tokenize the random descriptions (this creates the input_ids and attention_mask)
+        tokens = encoder_tokenizer(
+            descriptions,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=max_desc_len,
+            padding=True
+        )
+        
+        self.register_buffer("description_input_ids", tokens.input_ids)
+        self.register_buffer("description_attention_mask", tokens.attention_mask)
+
 
     def forward(
         self,
