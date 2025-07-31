@@ -184,10 +184,11 @@ class LabelCrossAttentionDE(nn.Module):
         
         # Initialize tokenized descriptions as buffers
         if target_tokenizer is not None:
-            if random_init== False:
+            if not random_init:
                 self._init_description_tokens(target_tokenizer, icd_version)
-            else: self._init_description_tokens_random(
-                encoder_tokenizer, target_tokenizer, max_desc_len=64)
+            else:
+                self._init_description_tokens_random(
+                    encoder_tokenizer, target_tokenizer, max_desc_len=64)
         
         # Initialize weights
         self._init_weights(mean=0.0, std=0.03)
@@ -653,11 +654,13 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         encoder_tokenizer=None,
         target_tokenizer=None,
         icd_version: int = 10,
-        max_desc_len: int = 64
+        max_desc_len: int = 64,
+        pooling_temperature: float = 1.0
     ):
         super().__init__()
         self.input_size = input_size
         self.scale = scale / (input_size ** 0.5)
+        self.pooling_temperature = pooling_temperature
 
         # Removed q_proj - use raw description embeddings
         # self.k_proj = nn.Linear(input_size, input_size, bias=False)
@@ -807,8 +810,8 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         desc_mask_for_importance = description_attention_mask.view(1, k, desc_seq_len)
         desc_importance.masked_fill_(~desc_mask_for_importance.bool(), -1e9)
         
-        # Softmax to get attention weights over description tokens
-        desc_weights = torch.softmax(desc_importance, dim=-1)  # [batch, k, desc_seq_len]
+        # Softmax with temperature to get attention weights over description tokens
+        desc_weights = torch.softmax(desc_importance / self.pooling_temperature, dim=-1)  # [batch, k, desc_seq_len]
         
         # Weighted pooling
         pooled_context = (context * desc_weights.unsqueeze(-1)).sum(dim=2)

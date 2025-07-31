@@ -107,7 +107,8 @@ class PLMICD(nn.Module):
                     encoder_tokenizer=encoder_tokenizer,
                     target_tokenizer=target_tokenizer,
                     icd_version=kwargs.get('icd_version', 10),
-                    max_desc_len=kwargs.get('max_desc_len', 64)
+                    max_desc_len=kwargs.get('max_desc_len', 64),
+                    pooling_temperature=kwargs.get('pooling_temperature', 1.0)
                 )
             elif attention_type == "dual_encoding":
                 self.label_wise_attention = LabelCrossAttentionDE(

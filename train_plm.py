@@ -117,41 +117,38 @@ def main(cfg: OmegaConf) -> None:
             LOGGER.info("Creating token-level model and loading compatible weights")
             model = factories.get_model(config=cfg.model, data_info=lookups.data_info, target_tokenizer=target_tokenizer)
             
-            # Load saved weights (following the same pattern as load_trained_model)
+            # Load saved weights - only load compatible weights for label_wise_attention
             checkpoint = torch.load(model_path / "best_model.pt", map_location=device)
-            missing_keys, unexpected_keys = model.load_state_dict(checkpoint["model"], strict=False)
+            
+            # Create a filtered state dict with only label_wise_attention weights
+            filtered_checkpoint = {}
+            for key, value in checkpoint["model"].items():
+                if "label_wise_attention" in key:
+                    filtered_checkpoint[key] = value
+            
+            missing_keys, unexpected_keys = model.load_state_dict(filtered_checkpoint, strict=False)
             LOGGER.info(f"Missing keys (randomly initialized): {len(missing_keys)}")
             LOGGER.info(f"Unexpected keys (ignored): {len(unexpected_keys)}")
             
-            # Print detailed key information for debugging
-            print("\n=== MISSING KEYS (not loaded from saved model) ===")
-            for key in missing_keys:
-                print(f"  {key}")
-            
-            print("\n=== UNEXPECTED KEYS (in saved model but not in current model) ===")  
-            for key in unexpected_keys:
-                print(f"  {key}")
-            
-            print(f"\n=== LABEL_WISE_ATTENTION KEYS ANALYSIS ===")
-            print("Keys in saved model:")
-            saved_label_keys = [k for k in checkpoint["model"].keys() if 'label_wise_attention' in k]
-            for key in sorted(saved_label_keys):
-                print(f"  {key}")
-            
-            print("Keys in current model:")
-            current_label_keys = [k for k, v in model.named_parameters() if 'label_wise_attention' in k]
-            for key in sorted(current_label_keys):
-                print(f"  {key}")
-            print("="*50)
-            
-            # Copy trained roberta_encoder weights to frozen_encoder
+            # Load trained roberta_encoder weights ONLY into frozen_encoder (keep trainable encoder random)
             if hasattr(model, 'frozen_encoder'):
-                LOGGER.info("Copying trained weights from roberta_encoder to frozen_encoder")
-                model.frozen_encoder.load_state_dict(model.roberta_encoder.state_dict())
+                LOGGER.info("Loading saved roberta_encoder weights into frozen_encoder only")
+                # Extract roberta_encoder weights from saved checkpoint
+                roberta_encoder_weights = {}
+                for key, value in checkpoint["model"].items():
+                    if key.startswith("roberta_encoder."):
+                        # Remove the "roberta_encoder." prefix to match frozen_encoder structure
+                        new_key = key.replace("roberta_encoder.", "")
+                        roberta_encoder_weights[new_key] = value
+                
+                # Load into frozen encoder
+                model.frozen_encoder.load_state_dict(roberta_encoder_weights, strict=False)
+                
                 # Freeze the frozen encoder parameters
                 for param in model.frozen_encoder.parameters():
                     param.requires_grad = False
-                LOGGER.info("Frozen encoder parameters set to requires_grad=False")
+                LOGGER.info("Frozen encoder loaded with saved weights and set to requires_grad=False")
+                LOGGER.info("Trainable roberta_encoder kept with random initialization")
             
             decision_boundary = checkpoint.get("db", None)
         else:
