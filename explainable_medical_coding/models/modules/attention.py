@@ -1,4 +1,6 @@
 from typing import Optional, Callable
+import random
+import string
 
 import torch
 import torch.nn as nn
@@ -211,18 +213,16 @@ class LabelCrossAttentionDE(nn.Module):
     
     def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, max_desc_len: int) -> None:
         """Initialize tokenized descriptions with random text as buffers."""
-        import random
-        import string
-        
-        def generate_random_text():
-            """Generate random text with characters and spaces."""
+        def generate_random_text(seed):
+            """Generate random text with characters and spaces using class-specific seed."""
+            rng = random.Random(42 + seed)
             result = []
-            remaining_length = random.randint(30, 130)  # Total character budget
+            remaining_length = rng.randint(30, 130)  # Total character budget
             
             while remaining_length > 0:
                 # Add random characters (3-10 chars)
-                char_length = min(random.randint(3, 10), remaining_length)
-                chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
+                char_length = min(rng.randint(3, 10), remaining_length)
+                chars = ''.join(rng.choices(string.ascii_letters + string.digits, k=char_length))
                 result.append(chars)
                 remaining_length -= char_length
                 
@@ -233,10 +233,10 @@ class LabelCrossAttentionDE(nn.Module):
             
             return ''.join(result)
         
-        # Generate random text for each target
+        # Generate random text for each target with different seeds
         descriptions = []
         for i in range(len(target_tokenizer)):
-            desc = generate_random_text()
+            desc = generate_random_text(i)
             descriptions.append(desc)
         
         # Tokenize the random descriptions (this creates the input_ids and attention_mask)
