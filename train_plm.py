@@ -130,6 +130,11 @@ def main(cfg: OmegaConf) -> None:
             LOGGER.info(f"Missing keys (randomly initialized): {len(missing_keys)}")
             LOGGER.info(f"Unexpected keys (ignored): {len(unexpected_keys)}")
             
+            # Freeze label_representations for consistent Stage 1 retrieval
+            if hasattr(model.label_wise_attention, 'label_representations'):
+                model.label_wise_attention.label_representations.requires_grad = False
+                LOGGER.info("Frozen label_representations for consistent Stage 1 retrieval")
+            
             # Load trained roberta_encoder weights ONLY into frozen_encoder (keep trainable encoder random)
             if hasattr(model, 'frozen_encoder'):
                 LOGGER.info("Loading saved roberta_encoder weights into frozen_encoder only")
