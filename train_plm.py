@@ -137,8 +137,8 @@ def main(cfg: OmegaConf) -> None:
                 roberta_encoder_weights = {}
                 for key, value in checkpoint["model"].items():
                     if key.startswith("roberta_encoder."):
-                        # Remove the "roberta_encoder." prefix to match frozen_encoder structure
-                        new_key = key.replace("roberta_encoder.", "")
+                        # Replace "roberta_encoder." with "frozen_encoder." to match frozen_encoder structure
+                        new_key = key.replace("roberta_encoder.", "frozen_encoder.")
                         roberta_encoder_weights[new_key] = value
                 
                 # Load into frozen encoder
