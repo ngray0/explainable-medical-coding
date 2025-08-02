@@ -141,8 +141,25 @@ def main(cfg: OmegaConf) -> None:
                         new_key = key.replace("roberta_encoder.", "frozen_encoder.")
                         roberta_encoder_weights[new_key] = value
                 
+                # Debug: Print key structures
+                LOGGER.info(f"Found {len(roberta_encoder_weights)} roberta_encoder keys to load")
+                LOGGER.info("Sample converted keys:")
+                for i, key in enumerate(list(roberta_encoder_weights.keys())[:3]):
+                    LOGGER.info(f"  {key}")
+                
+                LOGGER.info("Sample frozen_encoder expected keys:")
+                frozen_keys = list(model.frozen_encoder.state_dict().keys())
+                for i, key in enumerate(frozen_keys[:3]):
+                    LOGGER.info(f"  {key}")
+                
                 # Load into frozen encoder
-                model.frozen_encoder.load_state_dict(roberta_encoder_weights, strict=False)
+                missing_keys, unexpected_keys = model.frozen_encoder.load_state_dict(roberta_encoder_weights, strict=False)
+                LOGGER.info(f"Missing keys: {len(missing_keys)}")
+                LOGGER.info(f"Unexpected keys: {len(unexpected_keys)}")
+                if missing_keys:
+                    LOGGER.info("First 5 missing keys:")
+                    for key in missing_keys[:5]:
+                        LOGGER.info(f"  {key}")
                 
                 # Freeze the frozen encoder parameters
                 for param in model.frozen_encoder.parameters():
