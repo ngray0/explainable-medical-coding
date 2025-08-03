@@ -169,9 +169,9 @@ class LabelCrossAttentionDE(nn.Module):
         # freeze_label_embeddings: bool = False
     ):
         super().__init__()
-        # Removed K and V projections for better representation alignment
-        # self.weights_k = nn.Linear(input_size, input_size, bias=False)
-        # self.weights_v = nn.Linear(input_size, input_size)
+        # Add back K and V projections for clinical note
+        self.weights_k = nn.Linear(input_size, input_size, bias=False)
+        self.weights_v = nn.Linear(input_size, input_size)
         self.output_linear = nn.Linear(input_size, 1)
         self.layernorm = nn.LayerNorm(input_size)
         self.num_classes = num_classes
@@ -270,9 +270,9 @@ class LabelCrossAttentionDE(nn.Module):
             torch.Tensor: [batch_size, num_classes]
         """
 
-        # Use raw embeddings for perfect representation alignment
-        V = x  # No projection - raw clinical text embeddings
-        K = x  # No projection - raw clinical text embeddings
+        # Use projected embeddings for clinical text
+        V = self.weights_v(x)  # Projected clinical text embeddings
+        K = self.weights_k(x)  # Projected clinical text embeddings
         
         Q = encoded_descriptions  # Raw code description embeddings from same encoder
 
@@ -327,9 +327,9 @@ class LabelCrossAttentionDE(nn.Module):
             std (float, optional): Standard deviation of the normal distribution. Defaults to 0.03.
         """
 
-        # Removed K and V projection weight initialization since we use raw embeddings
-        # self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
-        # self.weights_v.weight = torch.nn.init.normal_(self.weights_v.weight, mean, std)
+        # Initialize K and V projection weights
+        self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
+        self.weights_v.weight = torch.nn.init.normal_(self.weights_v.weight, mean, std)
         self.output_linear.weight = torch.nn.init.normal_(
             self.output_linear.weight, mean, std
         )
@@ -662,9 +662,10 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.scale = scale / (input_size ** 0.5)
         self.pooling_temperature = pooling_temperature
 
-        # Removed q_proj - use raw description embeddings
-        # self.k_proj = nn.Linear(input_size, input_size, bias=False)
-        # self.v_proj = nn.Linear(input_size, input_size, bias=False)
+        # Add back projections
+        self.q_proj = nn.Linear(input_size, input_size, bias=False)
+        self.k_proj = nn.Linear(input_size, input_size, bias=False)
+        self.v_proj = nn.Linear(input_size, input_size, bias=False)
         self.output_linear = nn.Linear(input_size, 1)
         self.layernorm = nn.LayerNorm(input_size)
         
@@ -734,8 +735,9 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
     def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
-        # self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
-        # self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
+        self.q_proj.weight = torch.nn.init.normal_(self.q_proj.weight, mean, std)
+        self.k_proj.weight = torch.nn.init.normal_(self.k_proj.weight, mean, std)
+        self.v_proj.weight = torch.nn.init.normal_(self.v_proj.weight, mean, std)
         self.output_linear.weight = torch.nn.init.normal_(
             self.output_linear.weight, mean, std
         )
@@ -765,10 +767,10 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         batch_size, note_seq_len, _ = x.shape
         k, desc_seq_len, _ = encoded_descriptions.shape
         
-        # Use raw description embeddings as queries (no projection)
-        q_desc = encoded_descriptions                # -> [k, desc_seq, dim]
-        k_note = x                     # -> [batch, note_seq, dim]
-        v_note = x                     # -> [batch, note_seq, dim]
+        # Use projected embeddings
+        q_desc = self.q_proj(encoded_descriptions)   # -> [k, desc_seq, dim]
+        k_note = self.k_proj(x)                      # -> [batch, note_seq, dim]
+        v_note = self.v_proj(x)                      # -> [batch, note_seq, dim]
 
         # Cross attention: descriptions attend to note tokens
         # 'k,d,b,n' = num_classes, desc_seq, batch, note_seq
@@ -802,19 +804,13 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         context = torch.einsum('bkdn,bni->bkdi', attention, v_note)
         # -> context shape: [batch, k, desc_seq_len, input_size]
         
-        # Attention-weighted pooling over description sequence dimension
-        # Weight description tokens by how much they attended to the note
-        desc_importance = attention.sum(dim=-1)  # [batch, k, desc_seq_len] - total attention per desc token
+        # Mean pooling over description sequence dimension
+        # Apply description mask to context before pooling
+        desc_mask_for_pooling = description_attention_mask.view(1, k, desc_seq_len, 1).bool()
+        context.masked_fill_(~desc_mask_for_pooling, 0)
         
-        # Apply description mask to importance scores
-        desc_mask_for_importance = description_attention_mask.view(1, k, desc_seq_len)
-        desc_importance.masked_fill_(~desc_mask_for_importance.bool(), -1e9)
-        
-        # Softmax with temperature to get attention weights over description tokens
-        desc_weights = torch.softmax(desc_importance / self.pooling_temperature, dim=-1)  # [batch, k, desc_seq_len]
-        
-        # Weighted pooling
-        pooled_context = (context * desc_weights.unsqueeze(-1)).sum(dim=2)
+        # Mean pooling
+        pooled_context = context.sum(dim=2) / description_attention_mask.sum(dim=1).view(1, k, 1)
         # -> pooled_context shape: [batch, k, input_size]
 
         y = self.layernorm(pooled_context)
