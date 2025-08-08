@@ -265,21 +265,33 @@ class PLMICD(nn.Module):
 
     def _encode_subset_descriptions(self, top_k_indices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode only the descriptions for the given top-k indices."""
-        # Select descriptions for top-k indices - assume single batch for now
-        top_k_indices = top_k_indices.squeeze(0)  # Remove batch dimension
+        batch_size, k = top_k_indices.shape
         
-        subset_input_ids = self._dynamic_token_attention.description_input_ids[top_k_indices]  # [k, seq_len]
-        subset_attention_mask = self._dynamic_token_attention.description_attention_mask[top_k_indices]  # [k, seq_len]
+        # Handle batched top_k_indices by processing each batch item
+        all_encoded_descriptions = []
+        all_attention_masks = []
         
-        # Encode subset of descriptions using the trainable encoder
-        with torch.set_grad_enabled(self.training):
-            desc_outputs = self.roberta_encoder(
-                input_ids=subset_input_ids,
-                attention_mask=subset_attention_mask
-            )
+        for batch_idx in range(batch_size):
+            batch_indices = top_k_indices[batch_idx]  # [k]
             
-            # Return [k, desc_seq, dim] and [k, desc_seq]
-            return desc_outputs.last_hidden_state, subset_attention_mask
+            subset_input_ids = self._dynamic_token_attention.description_input_ids[batch_indices]  # [k, seq_len]
+            subset_attention_mask = self._dynamic_token_attention.description_attention_mask[batch_indices]  # [k, seq_len]
+            
+            # Encode subset of descriptions using the trainable encoder
+            with torch.set_grad_enabled(self.training):
+                desc_outputs = self.roberta_encoder(
+                    input_ids=subset_input_ids,
+                    attention_mask=subset_attention_mask
+                )
+                
+                all_encoded_descriptions.append(desc_outputs.last_hidden_state)  # [k, desc_seq, dim]
+                all_attention_masks.append(subset_attention_mask)  # [k, desc_seq]
+        
+        # Stack to get [batch_size, k, desc_seq, dim] and [batch_size, k, desc_seq]
+        encoded_descriptions = torch.stack(all_encoded_descriptions, dim=0)
+        attention_masks = torch.stack(all_attention_masks, dim=0)
+        
+        return encoded_descriptions, attention_masks
 
 
     def expand_topk_to_full_logits(

@@ -756,45 +756,43 @@ class DynamicTokenLevelCrossAttention(nn.Module):
             x (torch.Tensor): Clinical note embeddings. 
                               Shape: [batch_size, note_seq_len, input_size]
             encoded_descriptions (torch.Tensor): Pre-encoded description embeddings.
-                                               Shape: [k, desc_seq_len, input_size]
+                                               Shape: [batch_size, k, desc_seq_len, input_size]
             description_attention_mask (torch.Tensor): Mask for descriptions.
-                                                      Shape: [k, desc_seq_len]
+                                                      Shape: [batch_size, k, desc_seq_len]
             attention_masks (torch.Tensor): Mask for the clinical note. 
                                             Shape: [batch_size, note_seq_len]
         Returns:
             torch.Tensor: Logits for each of the k classes. Shape: [batch_size, k]
         """
         batch_size, note_seq_len, _ = x.shape
-        k, desc_seq_len, _ = encoded_descriptions.shape
+        _, k, desc_seq_len, _ = encoded_descriptions.shape
         
         # Use projected embeddings
-        q_desc = self.q_proj(encoded_descriptions)   # -> [k, desc_seq, dim]
+        q_desc = self.q_proj(encoded_descriptions)   # -> [batch_size, k, desc_seq, dim]
         k_note = self.k_proj(x)                      # -> [batch, note_seq, dim]
         v_note = self.v_proj(x)                      # -> [batch, note_seq, dim]
 
         # Cross attention: descriptions attend to note tokens
-        # 'k,d,b,n' = num_classes, desc_seq, batch, note_seq
-        att_weights = torch.einsum('kdi,bni->kdbn', q_desc, k_note) * self.scale
-        # -> att_weights shape: [k, desc_seq, batch_size, note_seq]
+        # 'b,k,d,i' @ 'b,n,i' -> 'b,k,d,n'
+        att_weights = torch.einsum('bkdi,bni->bkdn', q_desc, k_note) * self.scale
+        # -> att_weights shape: [batch_size, k, desc_seq, note_seq]
 
         # Handle attention masks
-        desc_mask = description_attention_mask.view(k, desc_seq_len, 1, 1)
+        desc_mask = description_attention_mask.view(batch_size, k, desc_seq_len, 1)
         
         if attention_masks is not None:
-            # Pad attention masks to match note sequence length (same as LabelCrossAttentionDE)
+            # Pad attention masks to match note sequence length
             attention_masks = torch.nn.functional.pad(
                 attention_masks, (0, note_seq_len - attention_masks.size(1)), value=0
             )
-            note_mask = attention_masks.view(1, 1, batch_size, note_seq_len)
+            note_mask = attention_masks.view(batch_size, 1, 1, note_seq_len)
             combined_mask = (desc_mask * note_mask).bool()
         else:
             # If no note mask provided, only use description mask
             combined_mask = desc_mask.bool()
-            combined_mask = combined_mask.expand(-1, -1, batch_size, note_seq_len)
+            combined_mask = combined_mask.expand(-1, -1, -1, note_seq_len)
         
-        # Rearrange for masking: [batch, k, desc_seq, note_seq]
-        att_weights = att_weights.permute(2, 0, 1, 3)
-        combined_mask = combined_mask.permute(2, 0, 1, 3)
+        # att_weights is already [batch, k, desc_seq, note_seq]
         att_weights.masked_fill_(~combined_mask, -1e9)
 
         attention = torch.softmax(att_weights, dim=-1)
@@ -806,11 +804,11 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         
         # Mean pooling over description sequence dimension
         # Apply description mask to context before pooling
-        desc_mask_for_pooling = description_attention_mask.view(1, k, desc_seq_len, 1).bool()
+        desc_mask_for_pooling = description_attention_mask.view(batch_size, k, desc_seq_len, 1).bool()
         context.masked_fill_(~desc_mask_for_pooling, 0)
         
         # Mean pooling
-        pooled_context = context.sum(dim=2) / description_attention_mask.sum(dim=1).view(1, k, 1)
+        pooled_context = context.sum(dim=2) / description_attention_mask.sum(dim=2).view(batch_size, k, 1)
         # -> pooled_context shape: [batch, k, input_size]
 
         y = self.layernorm(pooled_context)
