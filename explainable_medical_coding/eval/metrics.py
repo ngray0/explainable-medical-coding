@@ -549,6 +549,54 @@ class F1Score(Metric):
         self._fn = torch.zeros((self.number_of_classes)).to(self.device)
 
 
+class CombinedF1Score(Metric):
+    """Combined F1 Score that computes MicroF1 + MacroF1 for better early stopping/best model selection."""
+    metric_type = "classification"
+
+    def __init__(
+        self,
+        number_of_classes: int,
+        name: str = "f1_combined",
+        filter_codes: bool = True,
+    ):
+        if not filter_codes:
+            name = f"{name}_mullenbach"
+        super().__init__(
+            name=name,
+            number_of_classes=number_of_classes,
+        )
+        self.filter_codes = filter_codes
+
+    def update(self, predictions: torch.Tensor, targets: torch.Tensor):
+        self._tp += torch.sum((predictions) * (targets), dim=0)
+        self._fp += torch.sum(predictions * (1 - targets), dim=0)
+        self._fn += torch.sum((1 - predictions) * targets, dim=0)
+
+    def compute(
+        self,
+        y_probs: Optional[torch.Tensor] = None,
+        targets: Optional[torch.Tensor] = None,
+    ):
+        # Compute Micro F1
+        micro_f1 = (
+            self._tp.sum()
+            / (self._tp.sum() + 0.5 * (self._fp.sum() + self._fn.sum()) + 1e-10)
+        ).cpu()
+        
+        # Compute Macro F1
+        macro_f1 = torch.mean(
+            self._tp / (self._tp + 0.5 * (self._fp + self._fn) + 1e-10)
+        ).cpu()
+        
+        # Return sum of both
+        return micro_f1 + macro_f1
+
+    def reset(self):
+        self._tp = torch.zeros((self.number_of_classes)).to(self.device)
+        self._fp = torch.zeros((self.number_of_classes)).to(self.device)
+        self._fn = torch.zeros((self.number_of_classes)).to(self.device)
+
+
 """ ------------Information Retrieval Metrics-------------"""
 
 
