@@ -218,7 +218,7 @@ class LabelCrossAttentionDE(nn.Module):
             """Generate random text with characters and spaces using class-specific seed."""
             rng = random.Random(42 + seed)
             result = []
-            remaining_length = rng.randint(30, 130)  # Total character budget
+            remaining_length = 300  # Total character budget - will be truncated at max_desc_len to 64 tokens
             
             while remaining_length > 0:
                 # Add random characters (3-10 chars)
@@ -699,7 +699,7 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         def generate_random_text():
             """Generate random text with characters and spaces."""
             result = []
-            remaining_length = random.randint(50, 320)  # Total character budget
+            remaining_length = 300  # Total character budget - will be truncated at max_desc_len to 64 tokens
             
             while remaining_length > 0:
                 # Add random characters (3-10 chars)
