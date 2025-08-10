@@ -10,4 +10,5 @@ configs:
   mask_input: false
   freeze_label_embeddings: false
   init_with_descriptions: true
+  random_init: false  # Initialization of code descriptions with random text or real descriptions
   dropout_prob: 0.1

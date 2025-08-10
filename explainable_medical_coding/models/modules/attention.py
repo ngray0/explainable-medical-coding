@@ -1,4 +1,6 @@
 from typing import Optional, Callable
+import random
+import string
 
 import torch
 import torch.nn as nn
@@ -67,7 +69,8 @@ class LabelCrossAttention(nn.Module):
         model_path: str = None,
         target_tokenizer = None,
         icd_version: int = 10,
-        freeze_label_embeddings: bool = False
+        freeze_label_embeddings: bool = False,
+        random_init: bool = False
     ):
         super().__init__()
         self.weights_k = nn.Linear(input_size, input_size, bias=False)
@@ -82,7 +85,10 @@ class LabelCrossAttention(nn.Module):
         
         # Initialize weights
         if init_with_descriptions and model_path and target_tokenizer is not None:
-            self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
+            if random_init:
+                self._init_weights_random_descriptions(model_path, target_tokenizer, icd_version)
+            else:
+                self._init_weights_description_embeddings(model_path, target_tokenizer, icd_version)
         else:
             self._init_weights(mean=0.0, std=0.03)
         
@@ -224,6 +230,96 @@ class LabelCrossAttention(nn.Module):
                 return_tensors="pt", 
                 truncation=True, 
                 max_length=128,
+                padding=True
+            ).to('cuda')
+            
+            # Batch forward pass
+            with torch.no_grad():
+                outputs = embed_model(**tokens)
+                # Mean pooling with attention mask to handle padding
+                attention_mask = tokens['attention_mask'].unsqueeze(-1)
+                masked_embeddings = outputs.last_hidden_state * attention_mask
+                embeddings = masked_embeddings.sum(dim=1) / attention_mask.sum(dim=1)
+                all_embeddings.append(embeddings)
+        
+        # Combine all embeddings and replace parameter data
+        final_embeddings = torch.cat(all_embeddings, dim=0)
+        self.label_representations.data.copy_(final_embeddings)
+        
+        # Clean up the temporary model to free memory
+        del embed_model
+        del embed_tokenizer
+
+    def _init_weights_random_descriptions(
+        self, 
+        model_path: str, 
+        target_tokenizer,
+        icd_version: int = 10,
+        batch_size: int = 64,
+        max_desc_len: int = 128,
+        mean: float = 0.0, 
+        std: float = 0.03
+    ) -> None:
+        """Initialize label representations with embeddings from random text descriptions.
+
+        Args:
+            model_path (str): Path to the transformer model for generating embeddings
+            target_tokenizer: TargetTokenizer that maps indices to ICD codes
+            icd_version (int): ICD version (9 or 10). Defaults to 10.
+            batch_size (int): Batch size for processing descriptions. Defaults to 64.
+            max_desc_len (int): Maximum description length for tokenization. Defaults to 128.
+        """
+        self.weights_k.weight = torch.nn.init.normal_(self.weights_k.weight, mean, std)
+        self.weights_v.weight = torch.nn.init.normal_(self.weights_v.weight, mean, std)
+        
+        self.output_linear.weight = torch.nn.init.normal_(
+            self.output_linear.weight, mean, std
+        )
+
+        def generate_random_text(seed):
+            """Generate random text with characters and spaces using class-specific seed."""
+            rng = random.Random(42 + seed)
+            result = []
+            remaining_length = rng.randint(30, 130)  # Total character budget
+            
+            while remaining_length > 0:
+                # Add random characters (3-10 chars)
+                char_length = min(rng.randint(3, 10), remaining_length)
+                chars = ''.join(rng.choices(string.ascii_letters + string.digits, k=char_length))
+                result.append(chars)
+                remaining_length -= char_length
+                
+                # Add space if there's still length remaining
+                if remaining_length > 0:
+                    result.append(' ')
+                    remaining_length -= 1
+            
+            return ''.join(result)
+        
+        # Load embedding model
+        embed_model = AutoModel.from_pretrained(model_path)
+        embed_model = embed_model.cuda()
+        embed_tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Generate random text for each target with different seeds
+        descriptions = []
+        for i in range(len(target_tokenizer)):
+            desc = generate_random_text(i)
+            descriptions.append(desc)
+        
+        # Process descriptions in batches with progress bar
+        all_embeddings = []
+        batch_ranges = range(0, len(descriptions), batch_size)
+        
+        for i in track(batch_ranges, description="Generating random description embeddings..."):
+            batch_descriptions = descriptions[i:i+batch_size]
+            
+            # Batch tokenization
+            tokens = embed_tokenizer(
+                batch_descriptions,
+                return_tensors="pt", 
+                truncation=True, 
+                max_length=max_desc_len,
                 padding=True
             ).to('cuda')
             
