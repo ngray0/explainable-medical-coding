@@ -301,13 +301,15 @@ class PLMICD(nn.Module):
     ) -> torch.Tensor:
         """Expand top-k logits to full class space for compatibility with metrics."""
         batch_size = top_k_logits.size(0)
+        # Use large negative value instead of -inf to avoid numerical issues  
+        # Use float32 to avoid BFloat16 conversion issues
         full_logits = torch.full(
             (batch_size, self.num_classes), 
-            float('-inf'), 
+            -1e9, 
             device=top_k_logits.device, 
-            dtype=top_k_logits.dtype
+            dtype=torch.float32
         )
-        full_logits.scatter_(dim=1, index=top_k_indices, src=top_k_logits)
+        full_logits.scatter_(dim=1, index=top_k_indices, src=top_k_logits.float())
         return full_logits
 
     def encoder(
