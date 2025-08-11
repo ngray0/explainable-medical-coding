@@ -149,7 +149,7 @@ class Trainer:
                 device_type="cuda", enabled=self.use_amp, dtype=torch.bfloat16
             ):
                 y_probs, targets, loss = self.loss_function(
-                    batch.to(self.device), model=self.model, top_k=getattr(self.config, 'top_k', None)
+                    batch.to(self.device), model=self.model
                 )
             self.update_metrics(
                 y_probs=y_probs, targets=targets, loss=loss, split_name=split_name
@@ -302,7 +302,8 @@ class Trainer:
     ):
         target_tokenizer = self.lookups.target_tokenizer
         code_names = target_tokenizer.target_names()
-        logits = logits.numpy()
+        # Convert to float32 first to handle BFloat16 tensors
+        logits = logits.float().numpy()
         df = pd.DataFrame(logits, columns=code_names)
         df[TARGET_COLUMN] = list(map(target_tokenizer.torch_one_hot_decoder, targets))
         df[ID_COLUMN] = ids
