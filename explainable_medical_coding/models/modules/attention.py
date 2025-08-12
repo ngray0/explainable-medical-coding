@@ -188,7 +188,7 @@ class LabelCrossAttentionDE(nn.Module):
                 self._init_description_tokens(target_tokenizer, icd_version)
             else:
                 self._init_description_tokens_random(
-                    encoder_tokenizer, target_tokenizer, max_desc_len=64)
+                    encoder_tokenizer, target_tokenizer, icd_version, max_desc_len=64)
         
         # Initialize weights
         self._init_weights(mean=0.0, std=0.03)
@@ -212,16 +212,26 @@ class LabelCrossAttentionDE(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
     
-    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, max_desc_len: int) -> None:
+    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
         """Initialize tokenized descriptions with random text as buffers."""
-        def generate_random_text(seed):
-            """Generate random text with characters and spaces using class-specific seed."""
+        import random
+        import string
+        
+        # First get real descriptions to measure their lengths
+        code2desc = get_code2description_mimiciv_combined(icd_version)
+        real_descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
+        
+        def generate_random_text_of_length(target_length: int, seed: int = 42):
+            """Generate random text with specified character length."""
+            if target_length <= 0:
+                return ""
+            
             rng = random.Random(42 + seed)
             result = []
-            remaining_length = 300  # Total character budget - will be truncated at max_desc_len to 64 tokens
+            remaining_length = target_length
             
             while remaining_length > 0:
-                # Add random characters (3-10 chars)
+                # Add random characters (3-10 chars, but respect remaining length)
                 char_length = min(rng.randint(3, 10), remaining_length)
                 chars = ''.join(rng.choices(string.ascii_letters + string.digits, k=char_length))
                 result.append(chars)
@@ -234,11 +244,12 @@ class LabelCrossAttentionDE(nn.Module):
             
             return ''.join(result)
         
-        # Generate random text for each target with different seeds
+        # Generate random text matching each real description's length
         descriptions = []
-        for i in range(len(target_tokenizer)):
-            desc = generate_random_text(i)
-            descriptions.append(desc)
+        for i, real_desc in enumerate(real_descriptions):
+            target_length = len(real_desc)
+            random_desc = generate_random_text_of_length(target_length, i)
+            descriptions.append(random_desc)
         
         # Tokenize the random descriptions (this creates the input_ids and attention_mask)
         tokens = encoder_tokenizer(
@@ -691,18 +702,25 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
-    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, max_desc_len: int) -> None:
+    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
         """Initialize tokenized descriptions with random text as buffers."""
         import random
         import string
         
-        def generate_random_text():
-            """Generate random text with characters and spaces."""
+        # First get real descriptions to measure their lengths
+        code2desc = get_code2description_mimiciv_combined(icd_version)
+        real_descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
+        
+        def generate_random_text_of_length(target_length: int):
+            """Generate random text with specified character length."""
+            if target_length <= 0:
+                return ""
+            
             result = []
-            remaining_length = 300  # Total character budget - will be truncated at max_desc_len to 64 tokens
+            remaining_length = target_length
             
             while remaining_length > 0:
-                # Add random characters (3-10 chars)
+                # Add random characters (3-10 chars, but respect remaining length)
                 char_length = min(random.randint(3, 10), remaining_length)
                 chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
                 result.append(chars)
@@ -715,12 +733,13 @@ class DynamicTokenLevelCrossAttention(nn.Module):
             
             return ''.join(result)
         
-        # Generate random text for each target
+        # Generate random text matching each real description's length
         descriptions = []
         random.seed(42)  # For reproducibility
-        for i in range(len(target_tokenizer)):
-            desc = generate_random_text()
-            descriptions.append(desc)
+        for real_desc in real_descriptions:
+            target_length = len(real_desc)
+            random_desc = generate_random_text_of_length(target_length)
+            descriptions.append(random_desc)
         
         # Tokenize the random descriptions (this creates the input_ids and attention_mask)
         tokens = encoder_tokenizer(
