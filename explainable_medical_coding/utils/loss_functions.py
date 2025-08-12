@@ -79,7 +79,7 @@ def binary_cross_entropy_loss(
         batch.targets,
         batch.attention_masks,
     )
-    logits = model(input_ids, attention_masks, top_k=top_k)
+    logits = model(input_ids, attention_masks, top_k=top_k, targets=targets)
     loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets)
     return torch.sigmoid(logits), targets, loss
 
