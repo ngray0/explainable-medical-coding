@@ -266,9 +266,35 @@ class LabelCrossAttentionDE(nn.Module):
             padding=True
         )
         
-        # Use random tokens but with REAL attention masks for identical computation
-        self.register_buffer("description_input_ids", random_tokens.input_ids)
-        self.register_buffer("description_attention_mask", real_attention_mask)
+        # Replace random tokens with real attention patterns to ensure identical computation
+        # Copy random token content but match the structure of real tokens exactly
+        final_input_ids = real_tokens.input_ids.clone()
+        final_attention_mask = real_tokens.attention_mask.clone()
+        
+        # For each description, replace the actual content tokens (non-padding) with random tokens
+        for i in range(len(target_tokenizer)):
+            # Find how many non-padding tokens the real description has
+            real_length = real_tokens.attention_mask[i].sum().item()
+            
+            # Get random tokens for this description (excluding special tokens)
+            random_content = random_tokens.input_ids[i]
+            # Skip CLS token, take content tokens, avoid SEP/PAD tokens
+            if encoder_tokenizer.cls_token_id is not None:
+                content_start = 1
+            else:
+                content_start = 0
+                
+            # Replace real content with random content, keeping same structure
+            content_length = real_length - content_start  # Account for CLS
+            if encoder_tokenizer.sep_token_id is not None:
+                content_length -= 1  # Account for SEP
+                
+            if content_length > 0:
+                random_content_tokens = random_content[content_start:content_start + content_length]
+                final_input_ids[i, content_start:content_start + len(random_content_tokens)] = random_content_tokens
+        
+        self.register_buffer("description_input_ids", final_input_ids)
+        self.register_buffer("description_attention_mask", final_attention_mask)
 
 
     def forward(
