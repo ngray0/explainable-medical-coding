@@ -217,86 +217,58 @@ class LabelCrossAttentionDE(nn.Module):
         import random
         import string
         
-        # Get real descriptions and tokenize them to get target token lengths
+        # First get real descriptions and tokenize them to get the attention masks
         code2desc = get_code2description_mimiciv_combined(icd_version)
         real_descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
         
-        # Tokenize real descriptions to get their token lengths (without padding)
+        # Tokenize real descriptions to get their attention masks
         real_tokens = encoder_tokenizer(
             real_descriptions,
-            add_special_tokens=True,
+            return_tensors="pt", 
             truncation=True, 
             max_length=max_desc_len,
-            padding=False
+            padding=True
         )
-        real_token_lengths = [len(tokens) for tokens in real_tokens.input_ids]
+        real_attention_mask = real_tokens.attention_mask
         
-        # Generate one long random text
-        def generate_long_random_text(seed: int = 42):
-            """Generate long random text."""
-            rng = random.Random(seed)
-            words = []
-            for _ in range(max_desc_len * len(target_tokenizer)):  # Generate plenty
-                word_len = rng.randint(3, 10)
-                word = ''.join(rng.choices(string.ascii_letters, k=word_len))
-                words.append(word)
-            return ' '.join(words)
-        
-        long_random_text = generate_long_random_text(42)
-        
-        # Tokenize the long random text
-        long_tokens = encoder_tokenizer(
-            long_random_text,
-            add_special_tokens=False,  # We'll add special tokens per description
-            truncation=False,
-            padding=False
-        )
-        
-        # Create individual random descriptions with exact token counts
-        random_input_ids = []
-        random_attention_masks = []
-        
-        token_start = 0
-        for i, target_length in enumerate(real_token_lengths):
-            # Get exactly target_length tokens from the long random sequence
-            if token_start + target_length <= len(long_tokens.input_ids):
-                desc_tokens = long_tokens.input_ids[token_start:token_start + target_length]
-            else:
-                # Wrap around if we run out
-                remaining = target_length
-                desc_tokens = []
-                pos = token_start
-                while remaining > 0:
-                    available = len(long_tokens.input_ids) - pos
-                    take = min(remaining, available)
-                    desc_tokens.extend(long_tokens.input_ids[pos:pos + take])
-                    remaining -= take
-                    pos = 0  # Wrap to beginning
-                    
-            # Add special tokens and pad to max_desc_len
-            if encoder_tokenizer.cls_token_id is not None:
-                desc_tokens = [encoder_tokenizer.cls_token_id] + desc_tokens
-            if encoder_tokenizer.sep_token_id is not None:
-                desc_tokens = desc_tokens + [encoder_tokenizer.sep_token_id]
+        def generate_random_text():
+            """Generate 300 random characters with spaces."""
+            result = []
+            remaining_length = 300
+            
+            while remaining_length > 0:
+                # Add random characters (3-10 chars)
+                char_length = min(random.randint(3, 10), remaining_length)
+                chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
+                result.append(chars)
+                remaining_length -= char_length
                 
-            # Pad or truncate to max_desc_len
-            if len(desc_tokens) > max_desc_len:
-                desc_tokens = desc_tokens[:max_desc_len]
+                # Add space if there's still length remaining
+                if remaining_length > 0:
+                    result.append(' ')
+                    remaining_length -= 1
             
-            attention_mask = [1] * len(desc_tokens) + [0] * (max_desc_len - len(desc_tokens))
-            desc_tokens = desc_tokens + [encoder_tokenizer.pad_token_id] * (max_desc_len - len(desc_tokens))
-            
-            random_input_ids.append(desc_tokens)
-            random_attention_masks.append(attention_mask)
-            
-            token_start += target_length
+            return ''.join(result)
         
-        # Convert to tensors and register as buffers
-        tokens_input_ids = torch.tensor(random_input_ids)
-        tokens_attention_mask = torch.tensor(random_attention_masks)
+        # Generate random descriptions for all classes
+        descriptions = []
+        random.seed(42)  # For reproducibility
+        for i in range(len(target_tokenizer)):
+            random_desc = generate_random_text()
+            descriptions.append(random_desc)
         
-        self.register_buffer("description_input_ids", tokens_input_ids)
-        self.register_buffer("description_attention_mask", tokens_attention_mask)
+        # Tokenize random descriptions (they'll be truncated to max_desc_len)
+        random_tokens = encoder_tokenizer(
+            descriptions,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=max_desc_len,
+            padding=True
+        )
+        
+        # Use random tokens but with REAL attention masks for identical computation
+        self.register_buffer("description_input_ids", random_tokens.input_ids)
+        self.register_buffer("description_attention_mask", real_attention_mask)
 
 
     def forward(
