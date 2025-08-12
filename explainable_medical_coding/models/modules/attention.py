@@ -740,20 +740,27 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         import random
         import string
         
-        # First get real descriptions to measure their lengths
+        # First get real descriptions and tokenize them to get the attention masks
         code2desc = get_code2description_mimiciv_combined(icd_version)
         real_descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
         
-        def generate_random_text_of_length(target_length: int):
-            """Generate random text with specified character length."""
-            if target_length <= 0:
-                return ""
-            
+        # Tokenize real descriptions to get their attention masks
+        real_tokens = encoder_tokenizer(
+            real_descriptions,
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=max_desc_len,
+            padding=True
+        )
+        real_attention_mask = real_tokens.attention_mask
+        
+        def generate_random_text():
+            """Generate 300 random characters with spaces."""
             result = []
-            remaining_length = target_length
+            remaining_length = 300
             
             while remaining_length > 0:
-                # Add random characters (3-10 chars, but respect remaining length)
+                # Add random characters (3-10 chars)
                 char_length = min(random.randint(3, 10), remaining_length)
                 chars = ''.join(random.choices(string.ascii_letters + string.digits, k=char_length))
                 result.append(chars)
@@ -766,16 +773,15 @@ class DynamicTokenLevelCrossAttention(nn.Module):
             
             return ''.join(result)
         
-        # Generate random text matching each real description's length
+        # Generate random descriptions for all classes
         descriptions = []
         random.seed(42)  # For reproducibility
-        for real_desc in real_descriptions:
-            target_length = len(real_desc)
-            random_desc = generate_random_text_of_length(target_length)
+        for i in range(len(target_tokenizer)):
+            random_desc = generate_random_text()
             descriptions.append(random_desc)
         
-        # Tokenize the random descriptions (this creates the input_ids and attention_mask)
-        tokens = encoder_tokenizer(
+        # Tokenize random descriptions (they'll be truncated to max_desc_len)
+        random_tokens = encoder_tokenizer(
             descriptions,
             return_tensors="pt", 
             truncation=True, 
@@ -783,8 +789,35 @@ class DynamicTokenLevelCrossAttention(nn.Module):
             padding=True
         )
         
-        self.register_buffer("description_input_ids", tokens.input_ids)
-        self.register_buffer("description_attention_mask", tokens.attention_mask)
+        # Replace random tokens with real attention patterns to ensure identical computation
+        # Copy random token content but match the structure of real tokens exactly
+        final_input_ids = real_tokens.input_ids.clone()
+        final_attention_mask = real_tokens.attention_mask.clone()
+        
+        # For each description, replace the actual content tokens (non-padding) with random tokens
+        for i in range(len(target_tokenizer)):
+            # Find how many non-padding tokens the real description has
+            real_length = real_tokens.attention_mask[i].sum().item()
+            
+            # Get random tokens for this description (excluding special tokens)
+            random_content = random_tokens.input_ids[i]
+            # Skip CLS token, take content tokens, avoid SEP/PAD tokens
+            if encoder_tokenizer.cls_token_id is not None:
+                content_start = 1
+            else:
+                content_start = 0
+                
+            # Replace real content with random content, keeping same structure
+            content_length = real_length - content_start  # Account for CLS
+            if encoder_tokenizer.sep_token_id is not None:
+                content_length -= 1  # Account for SEP
+                
+            if content_length > 0:
+                random_content_tokens = random_content[content_start:content_start + content_length]
+                final_input_ids[i, content_start:content_start + len(random_content_tokens)] = random_content_tokens
+        
+        self.register_buffer("description_input_ids", final_input_ids)
+        self.register_buffer("description_attention_mask", final_attention_mask)
 
     def _init_weights(self, mean: float = 0.0, std: float = 0.03) -> None:
         self.q_proj.weight = torch.nn.init.normal_(self.q_proj.weight, mean, std)
