@@ -699,7 +699,8 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         target_tokenizer=None,
         icd_version: int = 10,
         max_desc_len: int = 64,
-        pooling_temperature: float = 1.0
+        pooling_temperature: float = 1.0,
+        random_init: bool = False
     ):
         super().__init__()
         self.input_size = input_size
@@ -714,9 +715,13 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.layernorm = nn.LayerNorm(input_size)
         
         # Tokenize and store all descriptions
-        if encoder_tokenizer is not None and target_tokenizer is not None:
-            self._init_description_tokens(encoder_tokenizer, target_tokenizer, icd_version, max_desc_len)
-        
+        if target_tokenizer is not None:
+            if not random_init:
+                self._init_description_tokens(target_tokenizer, icd_version)
+            else:
+                self._init_description_tokens_random(
+                    encoder_tokenizer, target_tokenizer, icd_version, max_desc_len=64)
+                        
         self._init_weights()
 
     def _init_description_tokens(self, encoder_tokenizer, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
@@ -897,6 +902,10 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         # -> pooled_context shape: [batch, k, input_size]
 
         y = self.layernorm(pooled_context)
-        output = self.output_linear(y).squeeze(-1)  # -> [batch, k]
+        output = (
+            self.output_linear.weight.mul(y)                # [C, D] * [B, C, D]
+            .sum(dim=2)                                     # dot product per class
+            .add(self.output_linear.bias)                   # add class-specific bias
+        )   
         
         return output

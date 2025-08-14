@@ -108,7 +108,8 @@ class PLMICD(nn.Module):
                     target_tokenizer=target_tokenizer,
                     icd_version=kwargs.get('icd_version', 10),
                     max_desc_len=kwargs.get('max_desc_len', 64),
-                    pooling_temperature=kwargs.get('pooling_temperature', 1.0)
+                    pooling_temperature=kwargs.get('pooling_temperature', 1.0),
+                    random_init=random_init
                 )
             elif attention_type == "dual_encoding":
                 self.label_wise_attention = LabelCrossAttentionDE(
@@ -514,7 +515,7 @@ class PLMICD(nn.Module):
                 top_k_scores, top_k_indices = torch.topk(logits, k=top_k, dim=-1)
                 
                 # During training, ensure all true targets are included
-                if self.training and targets is not None:
+                if self.training is not None:
                     batch_size = targets.size(0)
                     for batch_idx in range(batch_size):
                         # Get true target indices for this sample
