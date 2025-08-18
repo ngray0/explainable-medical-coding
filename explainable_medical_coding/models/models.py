@@ -44,7 +44,7 @@ class PLMICD(nn.Module):
         chunk_size: int,
         pad_token_id: int,
         cross_attention: bool = True,
-        attention_type: str = "label",  # "label", "token_level"
+        attention_type: str = "label",  # "label", "token_level", "dual_encoding"
         random_init: bool = False,
         scale: float = 1.0,
         mask_input: bool = False,
@@ -515,7 +515,7 @@ class PLMICD(nn.Module):
                 top_k_scores, top_k_indices = torch.topk(logits, k=top_k, dim=-1)
                 
                 # During training, ensure all true targets are included
-                if self.training is not None:
+                if self.training:
                     batch_size = targets.size(0)
                     for batch_idx in range(batch_size):
                         # Get true target indices for this sample

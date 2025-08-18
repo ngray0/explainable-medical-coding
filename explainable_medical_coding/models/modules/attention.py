@@ -724,7 +724,7 @@ class DynamicTokenLevelCrossAttention(nn.Module):
                         
         self._init_weights()
 
-    def _init_description_tokens(self, encoder_tokenizer, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
+    def _init_description_tokens(self, encoder_tokenizer, target_tokenizer, icd_version: int = 10, max_desc_len: int = 64) -> None:
         """Initialize tokenized descriptions as buffers."""
         code2desc = get_code2description_mimiciv_combined(icd_version)
         descriptions = [code2desc[target_tokenizer.id2target[i]] for i in range(len(target_tokenizer))]
@@ -740,7 +740,7 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         self.register_buffer("description_input_ids", tokens.input_ids)
         self.register_buffer("description_attention_mask", tokens.attention_mask)
 
-    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, icd_version: int, max_desc_len: int) -> None:
+    def _init_description_tokens_random(self, encoder_tokenizer, target_tokenizer, icd_version: int = 10, max_desc_len: int = 64) -> None:
         """Initialize tokenized descriptions with random text as buffers."""
         import random
         import string
