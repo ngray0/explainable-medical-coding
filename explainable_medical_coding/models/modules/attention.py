@@ -717,10 +717,10 @@ class DynamicTokenLevelCrossAttention(nn.Module):
         # Tokenize and store all descriptions
         if target_tokenizer is not None:
             if not random_init:
-                self._init_description_tokens(target_tokenizer, icd_version)
+                self._init_description_tokens(encoder_tokenizer=encoder_tokenizer, target_tokenizer=target_tokenizer, icd_version=icd_version, max_desc_len=max_desc_len)
             else:
                 self._init_description_tokens_random(
-                    encoder_tokenizer, target_tokenizer, icd_version, max_desc_len=64)
+                    encoder_tokenizer=encoder_tokenizer, target_tokenizer=target_tokenizer, icd_version=icd_version, max_desc_len=max_desc_len)
                         
         self._init_weights()
 
